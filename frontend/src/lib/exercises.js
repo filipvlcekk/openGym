@@ -1,5 +1,5 @@
 import { EXDB } from './exercises-data.js'
-import { t } from './i18n.js'
+import { t } from './i18n-core.js'
 
 export { EXDB }
 export const EXIDX = {}
@@ -29,8 +29,9 @@ export const allExercises = st => [...(st.customEx || []), ...EXDB]
 // Media normally sits next to the app (img/ and gif/, mounted into the web container).
 // A build can point them somewhere else — the demo build pulls them off a CDN instead of
 // shipping ~140 MB of images into the deployment.
-const IMG_BASE = import.meta.env.VITE_IMG_BASE || 'img/'
-const GIF_BASE = import.meta.env.VITE_GIF_BASE || 'gif/'
+const ENV = import.meta.env || {}
+const IMG_BASE = ENV.VITE_IMG_BASE || 'img/'
+const GIF_BASE = ENV.VITE_GIF_BASE || 'gif/'
 export const imgSrc = ex => IMG_BASE + ex.img
 export const gifSrc = ex => GIF_BASE + ex.gif
 

@@ -44,11 +44,13 @@ into both native projects — re-run it after every web-code change before build
 ## App icons & splash screens
 
 `frontend/resources/icon.svg` is the 1024×1024 source (the app's dumbbell glyph on the
-app background). Generate all platform assets from it on a machine with the tooling:
+app background). Generate all platform assets from it on a machine with the tooling.
+`@capacitor/assets` is intentionally not kept as a project dev dependency because the
+current latest release pulls an old `sharp` stack; use it as a one-off generator instead:
 
 ```sh
 cd frontend
-npx @capacitor/assets generate --iconBackgroundColor '#0c0e12' --splashBackgroundColor '#0c0e12'
+npm exec --package @capacitor/assets -- capacitor-assets generate --iconBackgroundColor '#0c0e12' --splashBackgroundColor '#0c0e12'
 ```
 
 (If the generator won't take the SVG directly, export it to `resources/icon.png` at
