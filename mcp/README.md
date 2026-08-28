@@ -67,7 +67,7 @@ the server's stderr.
 
 ## Tools
 
-Nine read-only tools in this fork:
+Ten read-only tools in this fork:
 
 | Tool | What it answers |
 |---|---|
@@ -76,6 +76,7 @@ Nine read-only tools in this fork:
 | `get_week_plan` | What's on my plan this week, including today with any date-specific override? |
 | `list_workouts` | Recent sessions — newest first, with dates, sets done/planned, volume, duration, PRs. |
 | `get_workout` | Full set-by-set breakdown of one session, by `workout_id` or by date. On a day with two sessions the date alone returns both ids to pick from rather than guessing at one. |
+| `exercise_history` | Recent completed sessions for one exercise, newest first, with target, set labels and per-entry volume. |
 | `get_bodyweight` | Weigh-ins with the latest weight, the goal line, and deltas vs goal. |
 | `estimate_1rm` | All-time best 1RM for an exercise + the trend, or a PR table across all exercises. |
 | `muscle_balance` | Which muscles I've trained this week/month/all-time, ranked + which I've neglected. |
@@ -113,10 +114,10 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-39 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+42 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
-missing routine, zero-workout history, no synced state, superset links, three 1RM formulas,
-and deterministic progression recommendations.
+missing routine, zero-workout history, no synced state, superset links, per-exercise history,
+three 1RM formulas, and deterministic progression recommendations.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -124,8 +125,8 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 ## Roadmap
 
 - **Done (Phase 1):** read-only stdio, 8 base tools, direct `./data` access.
-- **Done (Phase 1.5):** `progression_next` tool (what does the policy prescribe next?).
-  No new deps; small surface area.
+- **Done (Phase 1.5):** `progression_next` and `exercise_history` tools for better
+  coaching reads. No new deps; small surface area.
 - **Phase 2:** read+write over stdio. Requires a long-lived token auth path minted from the
   admin dashboard (new `./data/tokens.json`) and a write-lock against the web UI's read-modify-
   write of `state-<uid>.json`. Tools: `log_workout`, `add_bodyweight`, `edit_routine`,

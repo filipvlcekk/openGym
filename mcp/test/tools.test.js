@@ -332,6 +332,73 @@ describe('get_workout', () => {
   })
 })
 
+/* ---------- exercise_history ---------- */
+
+describe('exercise_history', () => {
+  test('returns recent completed sessions for one exercise, newest first, with labels and volume', () => {
+    const exerciseId = '0426'
+    const expected = S.workouts
+      .filter(w => (w.entries || []).some(e =>
+        e.id === exerciseId && (e.sets || []).some(s => s.done)))
+      .slice()
+      .sort((a, b) => (b.d || '').localeCompare(a.d || ''))
+
+    expect(expected.length).toBeGreaterThan(2)
+
+    const r = call('exercise_history', { exercise_id: exerciseId, limit: 2 })
+    expect(r.unit).toBe('kg')
+    expect(r.exercise).toMatchObject({ id: exerciseId, name: EXDB.find(e => e.id === exerciseId).n, mode: 'reps' })
+    expect(r.total_count).toBe(expected.length)
+    expect(r.returned_count).toBe(2)
+    expect(r.sessions).toHaveLength(2)
+    expect(r.sessions.map(s => s.date)).toEqual(expected.slice(0, 2).map(w => w.d))
+
+    const firstRaw = expected[0]
+    const firstEntry = firstRaw.entries.find(e => e.id === exerciseId)
+    const expectedVolume = firstEntry.sets
+      .filter(s => s.done)
+      .reduce((sum, s) => sum + (Number(s.w) || 0) * (Number(s.r) || 0), 0)
+    expect(r.sessions[0]).toMatchObject({
+      date: firstRaw.d,
+      workout_id: firstRaw.id || null,
+      routine_id: firstRaw.routineId || null,
+      routine_name: firstRaw.name || null,
+      target: firstEntry.target || null,
+      sets_done: firstEntry.sets.filter(s => s.done).length,
+      volume: expectedVolume
+    })
+    r.sessions[0].sets.forEach(s => {
+      expect(s.done).toBe(true)
+      expect(typeof s.label).toBe('string')
+      expect(s.label.length).toBeGreaterThan(0)
+    })
+  })
+
+  test('limit caps returned sessions without changing total_count', () => {
+    const exerciseId = '0426'
+    const all = call('exercise_history', { exercise_id: exerciseId, limit: 100 })
+    const limited = call('exercise_history', { exercise_id: exerciseId, limit: 1 })
+
+    expect(all.total_count).toBeGreaterThan(1)
+    expect(limited.total_count).toBe(all.total_count)
+    expect(limited.returned_count).toBe(1)
+    expect(limited.sessions).toHaveLength(1)
+    expect(limited.sessions[0]).toEqual(all.sessions[0])
+  })
+
+  test('an exercise with no completed history returns an empty result, not an error', () => {
+    const used = new Set(S.workouts.flatMap(w => (w.entries || []).map(e => e.id)))
+    const unused = EXDB.find(e => !used.has(e.id))
+    expect(unused).toBeTruthy()
+
+    const r = call('exercise_history', { exercise_id: unused.id })
+    expect(r.exercise).toMatchObject({ id: unused.id, name: unused.n })
+    expect(r.total_count).toBe(0)
+    expect(r.returned_count).toBe(0)
+    expect(r.sessions).toEqual([])
+  })
+})
+
 /* ---------- get_bodyweight ---------- */
 
 describe('get_bodyweight', () => {
@@ -560,7 +627,8 @@ describe('shared: no-state fallback', () => {
       get_bodyweight: {},
       estimate_1rm: {},
       muscle_balance: { period: 'all' },
-      progression_next: { routine_id: 'routine', exercise_id: 'exercise' }
+      progression_next: { routine_id: 'routine', exercise_id: 'exercise' },
+      exercise_history: { exercise_id: 'exercise' }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

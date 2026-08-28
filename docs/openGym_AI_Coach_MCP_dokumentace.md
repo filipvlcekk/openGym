@@ -161,6 +161,13 @@ Upstream MCP server poskytuje osm read-only nástrojů:
 | `estimate_1rm` | odhad 1RM a trend |
 | `muscle_balance` | rozložení tréninkové zátěže mezi svaly |
 
+Tento fork k tomu ve Phase 1.5 přidává:
+
+| Tool | Účel |
+|---|---|
+| `progression_next` | další předepsaný target podle openGym progression engine |
+| `exercise_history` | poslední dokončené sessions pro jeden cvik bez tahání celých workoutů |
+
 Upstream MCP používá stejné pure helper funkce jako frontend, mimo jiné logiku pro:
 
 - workout history,
@@ -440,21 +447,28 @@ Takové MVP už poskytuje značnou hodnotu.
 
 ---
 
-# 9. Doporučená Phase 1.5 – progression tool
+# 9. Doporučená Phase 1.5 – coaching read tools
 
-Tento fork nyní přidává nástroj:
+Tento fork nyní přidává nástroje:
 
 ```text
 progression_next
+exercise_history
 ```
 
-Jeho účelem je odpovědět na otázku:
+`progression_next` odpovídá na otázku:
 
 > Co podle nastavené progression policy předepisuje openGym jako další krok?
 
 To je důležitější než nechat AI samostatně odhadovat pravidlo z historie.
 
-Skutečný výstup v tomto forku:
+`exercise_history` odpovídá na otázku:
+
+> Jak vypadaly poslední dokončené sessions pro konkrétní cvik?
+
+To snižuje množství surových dat v kontextu, protože agent nemusí tahat celé workouty a filtrovat je sám.
+
+Skutečný výstup `progression_next` v tomto forku:
 
 ```json
 {
@@ -468,6 +482,28 @@ Skutečný výstup v tomto forku:
   "next": { "weight": 82.5, "reps": null, "sec": null, "sets": null },
   "reason": "Every rep last time — 2.5 kg more.",
   "confidence": "deterministic"
+}
+```
+
+Skutečný výstup `exercise_history` v tomto forku:
+
+```json
+{
+  "unit": "kg",
+  "exercise": { "id": "bench_press", "name": "Bench Press", "mode": "reps" },
+  "total_count": 12,
+  "returned_count": 10,
+  "sessions": [
+    {
+      "date": "2026-07-24",
+      "workout_id": "workout-id",
+      "routine_name": "Upper A",
+      "target": { "sets": 4, "reps": 8, "weight": 80 },
+      "sets": [{ "done": true, "label": "80×8", "w": 80, "r": 8 }],
+      "sets_done": 4,
+      "volume": 2560
+    }
+  ]
 }
 ```
 
@@ -648,6 +684,7 @@ get_routine
 get_week_plan
 list_workouts
 get_workout
+exercise_history
 get_bodyweight
 estimate_1rm
 muscle_balance
@@ -1016,8 +1053,8 @@ Agent provede:
 1. get_week_plan
 2. zjisti dnešní routine
 3. get_routine
-4. list_workouts
-5. načti relevantní předchozí session
+4. exercise_history pro hlavní cviky
+5. podle potřeby get_workout pro detail konkrétní session
 6. progression_next pro hlavní cviky
 7. případně bodyweight / muscle balance
 8. sestav briefing
@@ -1058,7 +1095,7 @@ Agent:
 1. list_workouts
 2. najde právě dokončený workout
 3. get_workout
-4. načte poslední 3–6 relevantních sessions
+4. exercise_history pro cviky, kde je potřeba trend
 5. porovná target vs completed
 6. progression_next
 7. zhodnotí trend
@@ -1245,10 +1282,16 @@ Například:
 list_workouts(limit=10)
 ```
 
-a potom:
+pro výběr konkrétní session, a potom:
 
 ```text
 get_workout(workout_id)
+```
+
+Pro trend jednoho cviku má agent použít jemnější řez:
+
+```text
+exercise_history(exercise_id, limit=10)
 ```
 
 Agent si vyžádá detail jen tam, kde ho potřebuje.
@@ -1275,13 +1318,13 @@ Vedle upstream tools mohou být časem užitečné vyšší analytické nástroj
 }
 ```
 
-Vrátí pouze relevantní série pro jeden cvik.
+Hotovo v tomto forku. Vrací pouze relevantní dokončené sessions pro jeden cvik, newest-first, včetně targetu, labels setů, počtu dokončených setů a per-entry volume.
 
 ---
 
 ## `progression_next`
 
-Vrátí další prescribed target podle openGym engine.
+Hotovo v tomto forku. Vrátí další prescribed target podle openGym engine.
 
 ---
 
@@ -1857,8 +1900,8 @@ AI radí, openGym ukládá.
 Přidat:
 
 ```text
-progression_next
-exercise_history
+progression_next   hotovo
+exercise_history   hotovo
 training_summary
 ```
 
@@ -1951,11 +1994,12 @@ Nejrozumnější první milestone:
 
 ```text
 1. dostat upstream MCP do forku
-2. rozchodit všech 8 read tools
+2. rozchodit všech 8 upstream read tools
 3. přidat progression_next
-4. vytvořit system prompt AI Coache
-5. několik týdnů používat read-only verzi
-6. zjistit, které write akce reálně chybí
+4. přidat exercise_history
+5. vytvořit system prompt AI Coache
+6. několik týdnů používat read-only verzi
+7. zjistit, které write akce reálně chybí
 ```
 
 Až potom implementovat write.
@@ -2125,7 +2169,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví a má deset read-only toolů včetně `progression_next` a `exercise_history`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 
@@ -2196,10 +2240,11 @@ Tento dokument kombinuje dvě kategorie informací:
 Patří sem zejména:
 
 - read-only stdio MCP,
-- devět read tools v tomto forku,
+- deset read tools v tomto forku,
 - přímé čtení `./data`,
 - reuse frontend training helpers,
 - hotový `progression_next`,
+- hotový `exercise_history`,
 - roadmapa write tools,
 - plán token auth,
 - plán write-locku,

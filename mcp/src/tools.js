@@ -1,4 +1,4 @@
-/* The eight read-only tools. Each handler returns JSON; labels.js pre-substitutes any
+/* Read-only MCP tools. Each handler returns JSON; labels.js pre-substitutes any
    {0}/{1} template the lib returns so the LLM gets final text, not template strings.
    ISO dates are validated on the way in; the handlers never see 'yesterday'. */
 import { z } from 'zod'
@@ -65,7 +65,32 @@ function prTable(S, formula) {
   return [...byId.values()].sort((a, b) => b.est - a.est)
 }
 
-/* ---------- the 8 tools ---------- */
+function entryVolume(e) {
+  return (e.sets || [])
+    .filter(s => s.done)
+    .reduce((sum, s) => sum + (Number(s.w) || 0) * (Number(s.r) || 0), 0)
+}
+
+function doneEntryView(e, S) {
+  return entryView({ ...e, sets: (e.sets || []).filter(s => s.done) }, S)
+}
+
+function routineConfigForExercise(S, exerciseId) {
+  for (const r of (S.routines || [])) {
+    const cfg = (r.ex || []).find(e => e.id === exerciseId)
+    if (cfg) return cfg
+  }
+  return null
+}
+
+function modeForExerciseHistory(S, exerciseId, rows) {
+  const latestTarget = rows[0]?.entry?.target
+  if (latestTarget) return modeOf({ ...latestTarget, id: exerciseId })
+  const cfg = routineConfigForExercise(S, exerciseId)
+  return modeOf(cfg || { id: exerciseId })
+}
+
+/* ---------- tools ---------- */
 
 /** list_routines — names + counts of each routine in the user's plan. */
 export const listRoutines = {
@@ -273,6 +298,57 @@ export const getWorkout = {
   }
 }
 
+/** exercise_history — recent completed sessions for one exercise. */
+export const exerciseHistory = {
+  name: 'exercise_history',
+  description: 'Return recent completed sessions for one exercise, newest first, with workout metadata, the prescribed target, completed set labels, done-set count and per-entry volume. Use this before coaching questions about a specific exercise trend instead of fetching full workouts and filtering them in the LLM context.',
+  schema: {
+    exercise_id: z.string().min(1).describe('Exercise id from get_routine or get_workout entries.'),
+    limit: z.number().int().min(1).max(100).optional().describe('Max sessions to return. Defaults to 10, capped at 100.')
+  },
+  handler: ({ exercise_id, limit }) => {
+    const S = getState()
+    if (!S) return noState()
+    const lim = Math.min(Math.max(limit || 10, 1), 100)
+    const rows = (S.workouts || [])
+      .map(w => {
+        const entry = (w.entries || []).find(e =>
+          e.id === exercise_id && (e.sets || []).some(s => s.done))
+        return entry ? { workout: w, entry } : null
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.workout.d || '').localeCompare(a.workout.d || ''))
+
+    const ex = exOr(exercise_id)
+    const sessions = rows.slice(0, lim).map(({ workout: w, entry }) => {
+      const view = doneEntryView(entry, S)
+      return {
+        date: w.d,
+        workout_id: w.id || null,
+        routine_id: w.routineId || null,
+        routine_name: w.name || null,
+        target: entry.target || null,
+        sets: view.sets,
+        sets_done: view.sets.length,
+        volume: entryVolume(entry)
+      }
+    })
+
+    return {
+      unit: S.unit || 'kg',
+      exercise: {
+        id: exercise_id,
+        name: ex.n,
+        body_part: ex.bp || null,
+        mode: modeForExerciseHistory(S, exercise_id, rows)
+      },
+      total_count: rows.length,
+      returned_count: sessions.length,
+      sessions
+    }
+  }
+}
+
 /** get_bodyweight — recent weigh-ins with the goal line. */
 export const getBodyweight = {
   name: 'get_bodyweight',
@@ -438,7 +514,7 @@ export const progressionNext = {
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, getBodyweight, estimate1rm, muscleBalance, progressionNext
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, getBodyweight, estimate1rm, muscleBalance, progressionNext
 ]
 
 function noState() {
