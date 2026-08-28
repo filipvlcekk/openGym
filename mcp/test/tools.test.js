@@ -36,6 +36,16 @@ function freshState() {
   return s
 }
 
+function isoDaysAgo(days) {
+  const d = new Date(FAKE_TODAY_ISO + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function sortedByDate(xs) {
+  return xs.slice().sort((a, b) => (a.d || '').localeCompare(b.d || ''))
+}
+
 // Pin "today" before building state so dayPlan/week alignment matches the assertions below.
 // `toFake: ['Date']` only — keeps fs.watch and the rest of the event loop real.
 beforeAll(() => {
@@ -399,6 +409,91 @@ describe('exercise_history', () => {
   })
 })
 
+/* ---------- training_summary ---------- */
+
+describe('training_summary', () => {
+  test('summarises the last 6 weeks with stable aggregate sections', () => {
+    const r = call('training_summary', { period: '6w' })
+
+    expect(r.period).toBe('6w')
+    expect(r.unit).toBe('kg')
+    expect(r.date_range).toEqual({ from: isoDaysAgo(42), to: FAKE_TODAY_ISO })
+    expect(r.workouts.completed).toBeGreaterThan(0)
+    expect(r.workouts.sets_done).toBeGreaterThan(0)
+    expect(r.workouts.volume).toBeGreaterThan(0)
+    expect(r.workouts.prs).toBeGreaterThanOrEqual(0)
+    expect(r.bodyweight.from).not.toBeNull()
+    expect(r.bodyweight.to).not.toBeNull()
+    expect(typeof r.bodyweight.change).toBe('number')
+    expect(r.effort.scale).toBe('RIR')
+    expect(r.effort.done_sets).toBeGreaterThan(0)
+    expect(r.effort.rated_sets).toBeGreaterThan(0)
+    expect(r.effort.avg).not.toBeNull()
+    expect(r.effort.hard_pct).not.toBeNull()
+    expect(r.muscle_coverage.worked_count).toBeGreaterThan(0)
+    expect(r.muscle_coverage.neglected_count).toBeGreaterThanOrEqual(0)
+    expect(r.muscle_coverage.top.length).toBeGreaterThan(0)
+    expect(r.muscle_coverage.top[0]).toHaveProperty('slug')
+    expect(r.muscle_coverage.top[0]).toHaveProperty('name')
+    expect(r.muscle_coverage.top[0]).toHaveProperty('effective_sets')
+    expect(r.muscle_coverage.worked_count + r.muscle_coverage.neglected_count)
+      .toBe(r.muscle_coverage.muscle_count)
+  })
+
+  test('week is a narrower window than 6w, and 6w is no larger than all', () => {
+    const week = call('training_summary', { period: 'week' })
+    const six = call('training_summary', { period: '6w' })
+    const all = call('training_summary', { period: 'all' })
+
+    expect(week.date_range).toEqual({ from: isoDaysAgo(7), to: FAKE_TODAY_ISO })
+    expect(all.date_range.from).toBeNull()
+    expect(week.workouts.completed).toBeLessThanOrEqual(six.workouts.completed)
+    expect(six.workouts.completed).toBeLessThanOrEqual(all.workouts.completed)
+    expect(week.workouts.sets_done).toBeLessThanOrEqual(six.workouts.sets_done)
+    expect(six.workouts.sets_done).toBeLessThanOrEqual(all.workouts.sets_done)
+    expect(week.workouts.volume).toBeLessThanOrEqual(six.workouts.volume)
+    expect(six.workouts.volume).toBeLessThanOrEqual(all.workouts.volume)
+  })
+
+  test('all covers the complete seeded history and bodyweight endpoints', () => {
+    const r = call('training_summary', { period: 'all' })
+    const bw = sortedByDate(S.bodyweight)
+    const expectedChange = Math.round((bw.at(-1).w - bw[0].w) * 10) / 10
+
+    expect(r.date_range).toEqual({ from: null, to: FAKE_TODAY_ISO })
+    expect(r.workouts.completed).toBe(S.workouts.length)
+    expect(r.bodyweight.from).toBe(bw[0].w)
+    expect(r.bodyweight.to).toBe(bw.at(-1).w)
+    expect(r.bodyweight.change).toBe(expectedChange)
+  })
+
+  test('zero-history state returns zeros and nulls rather than throwing', () => {
+    S.workouts = []
+    S.bodyweight = []
+    _seedStateForTests(S)
+
+    const r = call('training_summary', { period: 'month' })
+    expect(r.workouts).toEqual({ completed: 0, sets_done: 0, volume: 0, prs: 0 })
+    expect(r.bodyweight).toEqual({ from: null, to: null, change: null })
+    expect(r.effort.done_sets).toBe(0)
+    expect(r.effort.rated_sets).toBe(0)
+    expect(r.effort.avg).toBeNull()
+    expect(r.effort.hard_pct).toBeNull()
+    expect(r.muscle_coverage.worked_count).toBe(0)
+    expect(r.muscle_coverage.neglected_count).toBe(r.muscle_coverage.muscle_count)
+    expect(r.muscle_coverage.top).toEqual([])
+  })
+
+  test('one bodyweight point has endpoints but no change', () => {
+    S.workouts = []
+    S.bodyweight = [{ d: FAKE_TODAY_ISO, w: 79.2 }]
+    _seedStateForTests(S)
+
+    const r = call('training_summary', { period: 'week' })
+    expect(r.bodyweight).toEqual({ from: 79.2, to: 79.2, change: null })
+  })
+})
+
 /* ---------- get_bodyweight ---------- */
 
 describe('get_bodyweight', () => {
@@ -628,7 +723,8 @@ describe('shared: no-state fallback', () => {
       estimate_1rm: {},
       muscle_balance: { period: 'all' },
       progression_next: { routine_id: 'routine', exercise_id: 'exercise' },
-      exercise_history: { exercise_id: 'exercise' }
+      exercise_history: { exercise_id: 'exercise' },
+      training_summary: { period: '6w' }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

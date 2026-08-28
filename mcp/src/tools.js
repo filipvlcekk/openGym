@@ -14,6 +14,7 @@ import {
   estimate1RM, best1RM, e1rmSeries, DEFAULT_FORMULA, REP_CAP
 } from '../../frontend/src/lib/onerm.js'
 import { loadOfWorkouts, rankOf, levelsOf } from '../../frontend/src/lib/muscles.js'
+import { displayScale, effortSummary, scaleName } from '../../frontend/src/lib/effort.js'
 import { nextPrescription } from '../../frontend/src/lib/progression.js'
 
 /* ---------- helpers ---------- */
@@ -88,6 +89,78 @@ function modeForExerciseHistory(S, exerciseId, rows) {
   if (latestTarget) return modeOf({ ...latestTarget, id: exerciseId })
   const cfg = routineConfigForExercise(S, exerciseId)
   return modeOf(cfg || { id: exerciseId })
+}
+
+const PERIOD_DAYS = {
+  week: 7,
+  month: 30,
+  '6w': 42,
+  '12w': 84,
+  all: null
+}
+
+function currentISO() {
+  const d = new Date()
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
+
+function daysBeforeISO(iso, days) {
+  const d = new Date(iso + 'T12:00:00')
+  d.setDate(d.getDate() - days)
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
+
+function periodRange(period) {
+  const to = currentISO()
+  const days = PERIOD_DAYS[period]
+  return {
+    from: days == null ? null : daysBeforeISO(to, days),
+    to
+  }
+}
+
+function inDateRange(d, range) {
+  if (!d) return false
+  if (range.from && d < range.from) return false
+  if (range.to && d > range.to) return false
+  return true
+}
+
+function round1(n) {
+  return Math.round((Number(n) || 0) * 10) / 10
+}
+
+function nullableRound1(n) {
+  return n == null ? null : round1(n)
+}
+
+function bodyweightSummary(S, range) {
+  const entries = (S.bodyweight || [])
+    .filter(b => inDateRange(b.d, range))
+    .sort((a, b) => (a.d || '').localeCompare(b.d || ''))
+  const first = entries[0] || null
+  const last = entries.at(-1) || null
+  return {
+    from: first ? first.w : null,
+    to: last ? last.w : null,
+    change: entries.length >= 2 ? round1(last.w - first.w) : null
+  }
+}
+
+function muscleCoverageSummary(workouts) {
+  const load = loadOfWorkouts(workouts)
+  const { worked, missed } = rankOf(load)
+  return {
+    muscle_count: muscleOrder().length,
+    worked_count: worked.length,
+    neglected_count: missed.length,
+    top: worked.slice(0, 5).map(slug => ({
+      slug,
+      name: muscleName(slug),
+      effective_sets: round1(load[slug] || 0)
+    })),
+    neglected: missed.map(slug => ({ slug, name: muscleName(slug) }))
+  }
 }
 
 /* ---------- tools ---------- */
@@ -349,6 +422,43 @@ export const exerciseHistory = {
   }
 }
 
+/** training_summary — compact period-level aggregate for AI coaching context. */
+export const trainingSummary = {
+  name: 'training_summary',
+  description: 'Return a compact read-only training summary for a fixed period: completed workouts, done sets, volume, PRs, bodyweight change, effort coverage and muscle coverage. Use this for weekly reviews, post-workout summaries and planning context before asking for more detailed tools.',
+  schema: {
+    period: z.enum(['week', 'month', '6w', '12w', 'all']).describe('Summary window: last 7 days, last 30 days, last 6 weeks, last 12 weeks, or all history.')
+  },
+  handler: ({ period }) => {
+    const S = getState()
+    if (!S) return noState()
+    const range = periodRange(period)
+    const workouts = (S.workouts || []).filter(w => inDateRange(w.d, range))
+    const effort = effortSummary({ ...S, workouts }, 0)
+
+    return {
+      period,
+      unit: S.unit || 'kg',
+      date_range: range,
+      workouts: {
+        completed: workouts.length,
+        sets_done: workouts.reduce((sum, w) => sum + setsDone(w), 0),
+        volume: round1(workouts.reduce((sum, w) => sum + workoutVolume(w), 0)),
+        prs: workouts.reduce((sum, w) => sum + (w.prs || []).length, 0)
+      },
+      bodyweight: bodyweightSummary(S, range),
+      effort: {
+        scale: scaleName(displayScale(S)),
+        done_sets: effort.done,
+        rated_sets: effort.rated,
+        avg: nullableRound1(effort.avg),
+        hard_pct: nullableRound1(effort.hardPct)
+      },
+      muscle_coverage: muscleCoverageSummary(workouts)
+    }
+  }
+}
+
 /** get_bodyweight — recent weigh-ins with the goal line. */
 export const getBodyweight = {
   name: 'get_bodyweight',
@@ -514,7 +624,7 @@ export const progressionNext = {
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, getBodyweight, estimate1rm, muscleBalance, progressionNext
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, getBodyweight, estimate1rm, muscleBalance, progressionNext
 ]
 
 function noState() {
