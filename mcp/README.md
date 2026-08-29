@@ -13,8 +13,8 @@ The numbers it answers with are computed by the **same pure functions the React 
 (`frontend/src/lib/*.js`) — `estimate1RM`, `loadOfWorkouts`, `effectiveRoutine`, etc. — so a
 "what's my bench 1RM?" answer matches the Stats screen exactly.
 
-> Phase 2 is now underway. The fork ships twelve read-only tools plus the first scoped write
-> tool, `override_day`.
+> Phase 2 is now underway. The fork ships twelve read-only tools plus scoped schedule write
+> tools: `override_day` and `assign_weekday`.
 
 ## Quick start
 
@@ -67,7 +67,7 @@ the server's stderr.
 
 ## Tools
 
-Twelve read-only tools and one scoped write tool in this fork:
+Twelve read-only tools and two scoped write tools in this fork:
 
 | Tool | What it answers |
 |---|---|
@@ -84,6 +84,7 @@ Twelve read-only tools and one scoped write tool in this fork:
 | `muscle_balance` | Which muscles I've trained this week/month/all-time, ranked + which I've neglected. |
 | `progression_next` | What does openGym's configured progression policy prescribe next for this routine exercise? |
 | `override_day` | Write a one-off date override to a routine or `rest`. Requires `schedule:write`, `dry_run`, and `expected_revision`. |
+| `assign_weekday` | Write the recurring weekly schedule for one weekday. Use `rest` to clear that weekday. Requires `schedule:write`, `dry_run`, and `expected_revision`. |
 
 Each tool returns JSON the LLM can format as it likes; structured fields (sets, dates, levels)
 are pre-formatted into human-readable labels in `src/labels.js` so the LLM doesn't need to
@@ -117,11 +118,11 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-60 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+66 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
-progression recommendations, MCP write auth, and `override_day` dry-run/commit behavior.
+progression recommendations, MCP write auth, and schedule write dry-run/commit behavior.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -133,7 +134,7 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
   and `detect_stalls` tools for better coaching reads. No new deps; small surface area.
 - **In progress (Phase 2):** read+write over stdio. Done so far: long-lived token auth,
   `./data/tokens.json`, per-user state locks, `_revision` conflict checks, scrubbed
-  `audit.log`, and `override_day`. Remaining tools: `assign_weekday`, `edit_routine`,
+  `audit.log`, `override_day`, and `assign_weekday`. Remaining tools: `edit_routine`,
   future `log_workout` and `add_bodyweight`.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.

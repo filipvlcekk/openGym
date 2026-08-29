@@ -1964,7 +1964,8 @@ Stav k 2026-08-30:
 - hotovo: MCP token auth wiring přes `OPENGYM_MCP_TOKEN`,
 - hotovo: scrubovaný JSONL audit log pro úspěšné state writy,
 - hotovo: první MCP write tool `override_day` s dry-run, `schedule:write`, revision checkem a audit commitem,
-- zbývá: `assign_weekday`, `edit_routine` a užší validace mutací.
+- hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
+- zbývá: `edit_routine` a užší validace mutací.
 
 Současně:
 

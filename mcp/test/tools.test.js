@@ -1034,6 +1034,148 @@ describe('override_day', () => {
   })
 })
 
+/* ---------- assign_weekday ---------- */
+
+describe('assign_weekday', () => {
+  test('dry_run previews a weekly schedule change without writing state or audit', () => {
+    withWriteToolEnv({ state: { ...writeToolState(), week: { 1: 'push' } } }, ({ dataDir }) => {
+      const r = call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'pull',
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        changes: [{
+          path: 'week.1',
+          before: 'push',
+          after: 'pull'
+        }]
+      })
+      expect(readDiskState(dataDir).week['1']).toBe('push')
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit writes a weekly schedule assignment, increments revision and appends audit', () => {
+    withWriteToolEnv({ state: { ...writeToolState(), week: { 1: 'push' } } }, ({ dataDir, token }) => {
+      const r = call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'pull',
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'week.1',
+          before: 'push',
+          after: 'pull'
+        }]
+      })
+      expect(readDiskState(dataDir).week['1']).toBe('pull')
+      expect(readDiskState(dataDir)._revision).toBe(8)
+      const events = readAuditEvents(dataDir)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'assign_weekday',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: { weekday: 1, routine_id: 'pull' }
+      })
+    })
+  })
+
+  test('commit with routine_id rest removes the weekly assignment key', () => {
+    withWriteToolEnv({ state: { ...writeToolState(), week: { 1: 'push', 3: 'pull' } } }, ({ dataDir }) => {
+      const r = call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'rest',
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{ path: 'week.1', before: 'push', after: null }]
+      })
+      expect(readDiskState(dataDir).week).toEqual({ 3: 'pull' })
+    })
+  })
+
+  test('commit rejects stale expected_revision without changing state', () => {
+    withWriteToolEnv({ state: { ...writeToolState(), week: { 1: 'push' } } }, ({ dataDir }) => {
+      const r = call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'pull',
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).week['1']).toBe('push')
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires a token with schedule:write scope', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: { ...writeToolState(), week: { 1: 'push' } } }, () => {
+      const r = call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'pull',
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'schedule:write'
+        }
+      })
+    })
+  })
+
+  test('rejects unknown routine ids', () => {
+    withWriteToolEnv({ state: { ...writeToolState(), week: { 1: 'push' } } }, () => {
+      expect(() => call('assign_weekday', {
+        weekday: 1,
+        routine_id: 'missing',
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/no routine with id "missing"/)
+    })
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -1054,7 +1196,8 @@ describe('shared: no-state fallback', () => {
       exercise_history: { exercise_id: 'exercise' },
       training_summary: { period: '6w' },
       detect_stalls: { window: 4 },
-      override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true }
+      override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true },
+      assign_weekday: { weekday: 1, routine_id: 'rest', expected_revision: 0, dry_run: true }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

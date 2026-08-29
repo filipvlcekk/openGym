@@ -18,7 +18,8 @@ As of 2026-08-30:
 - Done: `mcp/src/write-auth.js` verifies `OPENGYM_MCP_TOKEN` with optional required scopes.
 - Done: `api/audit-service.js` writes scrubbed JSONL audit events for committed state writes.
 - Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
-- Not done: `assign_weekday`, `edit_routine` and narrower mutation validation.
+- Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
+- Not done: `edit_routine` and narrower mutation validation.
 
 ## Current State
 
@@ -478,7 +479,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 4. Done: Add token service and token management API.
 5. Done: Add MCP write auth from `OPENGYM_MCP_TOKEN`.
 6. Done: Implement `override_day` with dry-run first.
-7. Implement `assign_weekday`.
+7. Done: Implement `assign_weekday`.
 8. Implement narrow `edit_routine` patch ops.
 9. Done: Add audit log tests and conflict tests.
 

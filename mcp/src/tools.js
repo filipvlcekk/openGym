@@ -269,11 +269,28 @@ function requireOverrideTarget(S, routineId) {
   return routine.id
 }
 
+function requireRoutineOrRest(S, routineId) {
+  if (routineId === 'rest') return null
+  const routine = (S.routines || []).find(r => r.id === routineId)
+  if (!routine) { const e = new Error(`no routine with id ${JSON.stringify(routineId)}`); e.code = 'ENOENT'; throw e }
+  return routine.id
+}
+
 function overrideDayChange(S, date, routineId) {
   const after = requireOverrideTarget(S, routineId)
   const before = S.dayPlan?.[date] ?? null
   return {
     path: `dayPlan.${date}`,
+    before,
+    after
+  }
+}
+
+function assignWeekdayChange(S, weekday, routineId) {
+  const after = requireRoutineOrRest(S, routineId)
+  const before = S.week?.[weekday] ?? null
+  return {
+    path: `week.${weekday}`,
     before,
     after
   }
@@ -852,10 +869,89 @@ export const overrideDay = {
   }
 }
 
+/** assign_weekday — write a recurring weekday routine/rest assignment. */
+export const assignWeekday = {
+  name: 'assign_weekday',
+  description: 'Write the recurring weekly schedule for one weekday. Requires OPENGYM_MCP_TOKEN with schedule:write. Use routine_id="rest" to clear that weekday assignment.',
+  schema: {
+    weekday: z.number().int().min(0).max(6).describe('JS weekday number: Sunday=0, Monday=1, ... Saturday=6.'),
+    routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine, or "rest" to clear this weekday.'),
+    expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+    dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
+  },
+  handler: ({ weekday, routine_id, expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'schedule:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const change = assignWeekdayChange(S, weekday, routine_id)
+    const changes = change.before === change.after ? [] : [change]
+    const revision = revisionOf(S)
+
+    if (dry_run) {
+      return {
+        ok: true,
+        dry_run: true,
+        would_change: changes.length > 0,
+        revision,
+        changes
+      }
+    }
+
+    if (!changes.length) {
+      if (expected_revision !== revision) {
+        return {
+          ok: false,
+          error: {
+            code: 'STATE_CONFLICT',
+            message: 'State changed since the tool read it.',
+            current_revision: revision
+          }
+        }
+      }
+      return {
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: revision,
+        revision_after: revision,
+        changes
+      }
+    }
+
+    const result = states.updateUserState(auth.token.uid, current => {
+      const week = { ...(current.week || {}) }
+      if (change.after == null) delete week[weekday]
+      else week[weekday] = change.after
+      return { ...current, week }
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'assign_weekday',
+      expectedRevision: expected_revision,
+      details: { weekday, routine_id: change.after }
+    })
+    if (!result.ok) return result
+
+    return {
+      ok: true,
+      dry_run: false,
+      changed: true,
+      revision_before: revision,
+      revision_after: result.revision,
+      changes
+    }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday
 ]
 
 function noState() {
