@@ -8,7 +8,7 @@ The design goal is simple: every write must be authenticated, scoped, validated,
 
 ## Implementation Status
 
-As of 2026-08-29:
+As of 2026-08-30:
 
 - Done: `api/state-service.js` owns API state reads and full-state replacement.
 - Done: `updateUserState(uid, mutation, options)` supports per-user locks, `_revision` increments and optional `expectedRevision` conflict checks.
@@ -17,7 +17,8 @@ As of 2026-08-29:
 - Done: authenticated token management HTTP routes exist for create, list and revoke.
 - Done: `mcp/src/write-auth.js` verifies `OPENGYM_MCP_TOKEN` with optional required scopes.
 - Done: `api/audit-service.js` writes scrubbed JSONL audit events for committed state writes.
-- Not done: dry-run write tools and narrower mutation validation.
+- Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
+- Not done: `assign_weekday`, `edit_routine` and narrower mutation validation.
 
 ## Current State
 
@@ -476,7 +477,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 3. Done: Change `PUT /api/data` to use `updateUserState`.
 4. Done: Add token service and token management API.
 5. Done: Add MCP write auth from `OPENGYM_MCP_TOKEN`.
-6. Implement `override_day` with dry-run first.
+6. Done: Implement `override_day` with dry-run first.
 7. Implement `assign_weekday`.
 8. Implement narrow `edit_routine` patch ops.
 9. Done: Add audit log tests and conflict tests.

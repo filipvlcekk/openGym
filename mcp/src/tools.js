@@ -2,7 +2,10 @@
    {0}/{1} template the lib returns so the LLM gets final text, not template strings.
    ISO dates are validated on the way in; the handlers never see 'yesterday'. */
 import { z } from 'zod'
+import { createAuditService } from '../../api/audit-service.js'
+import { createStateService } from '../../api/state-service.js'
 import { getState, getUser } from './state.js'
+import { verifyMcpWriteToken } from './write-auth.js'
 import {
   setLabel, exLine, muscleName, policyName, friendlyDuration, ratio, muscleOrder, fmt
 } from './labels.js'
@@ -252,6 +255,33 @@ function stallCandidateFor(S, routine, cfg, window) {
 
 function severityRank(severity) {
   return severity === 'high' ? 0 : 1
+}
+
+function revisionOf(S) {
+  const revision = Number(S?._revision || 0)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
+}
+
+function requireOverrideTarget(S, routineId) {
+  if (routineId === 'rest') return 'rest'
+  const routine = (S.routines || []).find(r => r.id === routineId)
+  if (!routine) { const e = new Error(`no routine with id ${JSON.stringify(routineId)}`); e.code = 'ENOENT'; throw e }
+  return routine.id
+}
+
+function overrideDayChange(S, date, routineId) {
+  const after = requireOverrideTarget(S, routineId)
+  const before = S.dayPlan?.[date] ?? null
+  return {
+    path: `dayPlan.${date}`,
+    before,
+    after
+  }
+}
+
+function writeStateServices(dataDir) {
+  const audit = createAuditService({ dataDir })
+  return createStateService({ dataDir, audit })
 }
 
 /* ---------- tools ---------- */
@@ -740,10 +770,92 @@ export const progressionNext = {
   }
 }
 
+/** override_day — write a one-off routine/rest override for a date. */
+export const overrideDay = {
+  name: 'override_day',
+  description: 'Write a one-off schedule override for a date. Requires OPENGYM_MCP_TOKEN with schedule:write. Use dry_run=true first to preview the exact dayPlan change before committing it.',
+  schema: {
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Date to override as YYYY-MM-DD.'),
+    routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine, or "rest" to cancel training that day.'),
+    expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+    dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
+  },
+  handler: ({ date, routine_id, expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'schedule:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const change = overrideDayChange(S, date, routine_id)
+    const changes = change.before === change.after ? [] : [change]
+    const revision = revisionOf(S)
+
+    if (dry_run) {
+      return {
+        ok: true,
+        dry_run: true,
+        would_change: changes.length > 0,
+        revision,
+        changes
+      }
+    }
+
+    if (!changes.length) {
+      if (expected_revision !== revision) {
+        return {
+          ok: false,
+          error: {
+            code: 'STATE_CONFLICT',
+            message: 'State changed since the tool read it.',
+            current_revision: revision
+          }
+        }
+      }
+      return {
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: revision,
+        revision_after: revision,
+        changes
+      }
+    }
+
+    const result = states.updateUserState(auth.token.uid, current => {
+      return {
+        ...current,
+        dayPlan: {
+          ...(current.dayPlan || {}),
+          [date]: change.after
+        }
+      }
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'override_day',
+      expectedRevision: expected_revision,
+      details: { date, routine_id: change.after }
+    })
+    if (!result.ok) return result
+
+    return {
+      ok: true,
+      dry_run: false,
+      changed: true,
+      revision_before: revision,
+      revision_after: result.revision,
+      changes
+    }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay
 ]
 
 function noState() {

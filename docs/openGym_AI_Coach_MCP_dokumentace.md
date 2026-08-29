@@ -917,11 +917,11 @@ Tím vznikne jedno místo pro:
 
 # 17. Autentizace
 
-Současný read-only MCP používá filesystem jako security boundary.
+Read-only MCP tools používají filesystem jako security boundary.
 
 To je přijatelné, protože proces jen čte data dostupná uživateli, který jej spustil.
 
-Pro write tools upstream roadmapa počítá s dlouhodobými tokeny.
+Write tools používají dlouhodobé tokeny se scope.
 
 Doporučený model:
 
@@ -1469,7 +1469,7 @@ Příklad MCP konfigurace:
 
 # 31. Nasazení – openGym na VPS
 
-Současný read-only MCP pracuje s filesystem path.
+Read-only MCP tools pracují s filesystem path.
 
 Pokud openGym běží na VPS a AI client na notebooku, lokální MCP nemá automaticky přístup k:
 
@@ -1954,7 +1954,7 @@ docs/MCP_WRITE_ARCHITECTURE.md
 
 Základní rozhodnutí: nejdřív vytvořit sdílenou `updateUserState(uid, mutation, options)` vrstvu s per-user lockem, revision konflikty, atomickým zápisem a audit logem. Až nad ní stavět jednotlivé write tooly.
 
-Stav k 2026-08-29:
+Stav k 2026-08-30:
 
 - hotovo: `api/state-service.js`,
 - hotovo: `_revision` + per-user lock v `updateUserState`,
@@ -1963,7 +1963,8 @@ Stav k 2026-08-29:
 - hotovo: token management HTTP routes pro vytvoření, výpis a revokaci tokenů,
 - hotovo: MCP token auth wiring přes `OPENGYM_MCP_TOKEN`,
 - hotovo: scrubovaný JSONL audit log pro úspěšné state writy,
-- zbývá: dry-run write tools a užší validace mutací.
+- hotovo: první MCP write tool `override_day` s dry-run, `schedule:write`, revision checkem a audit commitem,
+- zbývá: `assign_weekday`, `edit_routine` a užší validace mutací.
 
 Současně:
 
@@ -2212,7 +2213,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví a má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a první scoped write tool `override_day`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

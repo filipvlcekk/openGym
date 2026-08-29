@@ -1,21 +1,20 @@
 # openGym MCP server
 
 A [Model Context Protocol](https://modelcontextprotocol.io) bridge that lets an external LLM
-application (Claude Desktop, Cursor, Cline, Continue, etc.) read your openGym profile —
-routines, workouts, body-weight log, estimated 1RMs, and muscle balance — directly from your
-self-hosted `./data` directory.
+application (Claude Desktop, Cursor, Cline, Continue, etc.) read your openGym profile and, when
+explicitly configured with a scoped MCP token, write narrow schedule changes directly against
+your self-hosted `./data` directory.
 
-It is read-only, runs locally as a stdio process spawned by the LLM client, adds no new
-container, and requires no extra authentication. The LLM never sees passkeys, VAPID keys, or
-session secrets — it can only read the same `state-<uid>.json` files the openGym api already
-writes.
+By default it is read-oriented, runs locally as a stdio process spawned by the LLM client, and
+adds no new container. Write tools require `OPENGYM_MCP_TOKEN` with a narrow scope. The LLM
+never sees passkeys, VAPID keys, or session secrets.
 
 The numbers it answers with are computed by the **same pure functions the React UI uses**
 (`frontend/src/lib/*.js`) — `estimate1RM`, `loadOfWorkouts`, `effectiveRoutine`, etc. — so a
 "what's my bench 1RM?" answer matches the Stats screen exactly.
 
-> Phase 1 of a multi-phase plan. Read-only today; long-lived token auth + write tools are
-> planned but not shipped yet. See **Roadmap** below.
+> Phase 2 is now underway. The fork ships twelve read-only tools plus the first scoped write
+> tool, `override_day`.
 
 ## Quick start
 
@@ -52,7 +51,8 @@ Add the server to your LLM client's MCP config. For Claude Desktop, edit
       "args": ["/absolute/path/to/openGym/mcp/src/index.js"],
       "env": {
         "OPENGYM_DATA": "/absolute/path/to/openGym/data",
-        "OPENGYM_UID": "<your-uid>"   // optional — auto-detected if you have one profile
+        "OPENGYM_UID": "<your-uid>",       // optional for read tools
+        "OPENGYM_MCP_TOKEN": "ogmcp_..."   // required only for write tools
       }
     }
   }
@@ -67,7 +67,7 @@ the server's stderr.
 
 ## Tools
 
-Twelve read-only tools in this fork:
+Twelve read-only tools and one scoped write tool in this fork:
 
 | Tool | What it answers |
 |---|---|
@@ -83,6 +83,7 @@ Twelve read-only tools in this fork:
 | `estimate_1rm` | All-time best 1RM for an exercise + the trend, or a PR table across all exercises. |
 | `muscle_balance` | Which muscles I've trained this week/month/all-time, ranked + which I've neglected. |
 | `progression_next` | What does openGym's configured progression policy prescribe next for this routine exercise? |
+| `override_day` | Write a one-off date override to a routine or `rest`. Requires `schedule:write`, `dry_run`, and `expected_revision`. |
 
 Each tool returns JSON the LLM can format as it likes; structured fields (sets, dates, levels)
 are pre-formatted into human-readable labels in `src/labels.js` so the LLM doesn't need to
@@ -105,8 +106,8 @@ dependencies landed in `frontend/`, no public exports changed.
 - **One runtime dependency beyond the MCP SDK:** none. No database driver, no HTTP framework.
 - **No new container.** stdio transport is spawned by the LLM client; nothing to add to
   `docker-compose.yml`.
-- **No new auth.** The filesystem is the boundary — same as `docker compose` running on the
-  user's box. No passkey material, VAPID keys, or session secrets ever cross it.
+- **Scoped write auth.** Read tools still use the local filesystem boundary. Write tools require
+  a hashed long-lived MCP token minted through the API.
 - **No telemetry, no network.** Reads `./data/*.json` and exits when the LLM client
   disconnects.
 
@@ -116,11 +117,11 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-51 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+60 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
-period training summaries, conservative stall detection, three 1RM formulas, and deterministic
-progression recommendations.
+period training summaries, conservative stall detection, three 1RM formulas, deterministic
+progression recommendations, MCP write auth, and `override_day` dry-run/commit behavior.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -130,10 +131,10 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 - **Done (Phase 1):** read-only stdio, 8 base tools, direct `./data` access.
 - **Done (Phase 1.5):** `progression_next`, `exercise_history`, `training_summary`
   and `detect_stalls` tools for better coaching reads. No new deps; small surface area.
-- **Phase 2:** read+write over stdio. Requires a long-lived token auth path minted from the
-  admin dashboard (new `./data/tokens.json`) and a write-lock against the web UI's read-modify-
-  write of `state-<uid>.json`. Tools: `log_workout`, `add_bodyweight`, `edit_routine`,
-  `assign_weekday`, `override_day`.
+- **In progress (Phase 2):** read+write over stdio. Done so far: long-lived token auth,
+  `./data/tokens.json`, per-user state locks, `_revision` conflict checks, scrubbed
+  `audit.log`, and `override_day`. Remaining tools: `assign_weekday`, `edit_routine`,
+  future `log_workout` and `add_bodyweight`.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.
 - **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same

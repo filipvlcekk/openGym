@@ -2,7 +2,12 @@
 // deterministic fixture the public demo runs on. The pure lib functions have their own 92
 // tests in frontend/src/lib/*.test.js; here we pin JSON shape + the user-facing edge cases
 // (rest-day override, missing routine, zero-workout history, no synced state, superset links).
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 import { describe, beforeAll, afterAll, beforeEach, test, expect, vi } from 'vitest'
+import { createTokenService } from '../../api/token-service.js'
 import { buildDemoState } from '../../frontend/src/lib/demoSeed.js'
 import { EXDB } from '../../frontend/src/lib/exercises.js'
 import { _seedStateForTests } from '../src/state.js'
@@ -63,6 +68,58 @@ function workout(id, date, routineId, name, entries) {
 
 function entry(id, target, sets) {
   return { id, target, sets: sets.map(s => ({ ...s, done: true })) }
+}
+
+function stateFile(dataDir, uid) {
+  return path.join(dataDir, `state-${uid}.json`)
+}
+
+function readDiskState(dataDir, uid = 'u1') {
+  return JSON.parse(fs.readFileSync(stateFile(dataDir, uid), 'utf8'))
+}
+
+function readAuditEvents(dataDir) {
+  try {
+    const text = fs.readFileSync(path.join(dataDir, 'audit.log'), 'utf8').trim()
+    return text ? text.split('\n').map(line => JSON.parse(line)) : []
+  } catch {
+    return []
+  }
+}
+
+function writeToolState() {
+  return {
+    _revision: 7,
+    unit: 'kg',
+    routines: [
+      { id: 'push', name: 'Push Day', emoji: 'P', policy: 'linear', ex: [] },
+      { id: 'pull', name: 'Pull Day', emoji: 'U', policy: 'linear', ex: [] }
+    ],
+    week: {},
+    dayPlan: { '2026-08-31': 'rest' },
+    workouts: [],
+    bodyweight: []
+  }
+}
+
+function withWriteToolEnv({ scopes = ['schedule:write'], state = writeToolState() } = {}, fn) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-override-day-'))
+  const prevData = process.env.OPENGYM_DATA
+  const prevToken = process.env.OPENGYM_MCP_TOKEN
+  try {
+    fs.writeFileSync(stateFile(dataDir, 'u1'), JSON.stringify(state))
+    const tokens = createTokenService({ dataDir })
+    const created = tokens.createToken({ uid: 'u1', name: 'Test MCP', scopes })
+    process.env.OPENGYM_DATA = dataDir
+    process.env.OPENGYM_MCP_TOKEN = created.token
+    fn({ dataDir, token: created.record })
+  } finally {
+    if (prevData === undefined) delete process.env.OPENGYM_DATA
+    else process.env.OPENGYM_DATA = prevData
+    if (prevToken === undefined) delete process.env.OPENGYM_MCP_TOKEN
+    else process.env.OPENGYM_MCP_TOKEN = prevToken
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
 }
 
 function syntheticStallState() {
@@ -856,6 +913,127 @@ describe('detect_stalls', () => {
   })
 })
 
+/* ---------- override_day ---------- */
+
+describe('override_day', () => {
+  test('dry_run previews a dayPlan change without writing state or audit', () => {
+    withWriteToolEnv({}, ({ dataDir }) => {
+      const r = call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'push',
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        changes: [{
+          path: 'dayPlan.2026-08-31',
+          before: 'rest',
+          after: 'push'
+        }]
+      })
+      expect(readDiskState(dataDir).dayPlan['2026-08-31']).toBe('rest')
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit writes a dayPlan override, increments revision and appends audit', () => {
+    withWriteToolEnv({}, ({ dataDir, token }) => {
+      const r = call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'push',
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'dayPlan.2026-08-31',
+          before: 'rest',
+          after: 'push'
+        }]
+      })
+      expect(readDiskState(dataDir).dayPlan['2026-08-31']).toBe('push')
+      expect(readDiskState(dataDir)._revision).toBe(8)
+      const events = readAuditEvents(dataDir)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'override_day',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: { date: '2026-08-31', routine_id: 'push' }
+      })
+    })
+  })
+
+  test('commit rejects stale expected_revision without changing state', () => {
+    withWriteToolEnv({}, ({ dataDir }) => {
+      const r = call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'push',
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).dayPlan['2026-08-31']).toBe('rest')
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires a token with schedule:write scope', () => {
+    withWriteToolEnv({ scopes: ['routine:write'] }, () => {
+      const r = call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'push',
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'schedule:write'
+        }
+      })
+    })
+  })
+
+  test('rejects unknown routine ids', () => {
+    withWriteToolEnv({}, () => {
+      expect(() => call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'missing',
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/no routine with id "missing"/)
+    })
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -875,7 +1053,8 @@ describe('shared: no-state fallback', () => {
       progression_next: { routine_id: 'routine', exercise_id: 'exercise' },
       exercise_history: { exercise_id: 'exercise' },
       training_summary: { period: '6w' },
-      detect_stalls: { window: 4 }
+      detect_stalls: { window: 4 },
+      override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})
