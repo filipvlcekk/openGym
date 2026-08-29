@@ -11,7 +11,7 @@ import {
 } from '../../frontend/src/lib/history.js'
 import { EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
 import {
-  estimate1RM, best1RM, e1rmSeries, DEFAULT_FORMULA, REP_CAP
+  estimate1RM, best1RM, bestSetOf, e1rmSeries, DEFAULT_FORMULA, REP_CAP
 } from '../../frontend/src/lib/onerm.js'
 import { loadOfWorkouts, rankOf, levelsOf } from '../../frontend/src/lib/muscles.js'
 import { displayScale, effortSummary, scaleName } from '../../frontend/src/lib/effort.js'
@@ -161,6 +161,97 @@ function muscleCoverageSummary(workouts) {
     })),
     neglected: missed.map(slug => ({ slug, name: muscleName(slug) }))
   }
+}
+
+function routinesToScan(S, routineId) {
+  if (!routineId) return S.routines || []
+  const routine = (S.routines || []).find(r => r.id === routineId)
+  if (!routine) { const e = new Error(`no routine with id ${JSON.stringify(routineId)}`); e.code = 'ENOENT'; throw e }
+  return [routine]
+}
+
+function doneSetsOf(entry) {
+  return (entry?.sets || []).filter(s => s.done)
+}
+
+function exerciseSessionRows(S, exerciseId) {
+  return (S.workouts || [])
+    .map(w => {
+      const entry = (w.entries || []).find(e =>
+        e.id === exerciseId && doneSetsOf(e).length)
+      if (!entry) return null
+      const best = bestSetOf(entry, DEFAULT_FORMULA)
+      if (!best) return null
+      return { workout: w, entry, best }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.workout.d || '').localeCompare(b.workout.d || ''))
+}
+
+function missedRoutineTarget(entry, cfg) {
+  const done = doneSetsOf(entry)
+  const targetSets = Math.max(1, cfg.sets || 1)
+  const targetReps = cfg.reps != null ? cfg.reps : cfg.repsMin != null ? cfg.repsMin : 0
+  if (done.length < targetSets) return true
+  if (targetReps && done.some(s => (Number(s.r) || 0) < targetReps)) return true
+  if (cfg.weight != null && done.some(s => (Number(s.w) || 0) < cfg.weight)) return true
+  return false
+}
+
+function currentTargetFor(cfg) {
+  return {
+    sets: cfg.sets || 1,
+    reps: cfg.reps != null ? cfg.reps : null,
+    reps_min: cfg.repsMin != null ? cfg.repsMin : null,
+    weight: cfg.weight != null ? cfg.weight : null
+  }
+}
+
+function topSetLabel(exerciseId, cfg, best) {
+  return setLabel(exerciseId, { w: best.w, r: best.r }, cfg)
+}
+
+function stallCandidateFor(S, routine, cfg, window) {
+  if (modeOf(cfg) !== 'reps') return null
+  const rows = exerciseSessionRows(S, cfg.id)
+  if (rows.length < 3) return null
+  const checked = rows.slice(-window)
+  if (checked.length < 3) return null
+
+  const latest = checked.at(-1)
+  const previousBest = Math.max(...checked.slice(0, -1).map(r => r.best.est))
+  const bestEstimateChange = round1(latest.best.est - previousBest)
+  const missedTargetSessions = checked.filter(r => missedRoutineTarget(r.entry, cfg)).length
+  const noImprovement = bestEstimateChange <= 0
+  if (!(noImprovement && missedTargetSessions >= 2) && missedTargetSessions < 3) return null
+
+  const ex = exOr(cfg.id)
+  return {
+    exercise: { id: cfg.id, name: ex.n, body_part: ex.bp || null, mode: 'reps' },
+    routine: { id: routine.id, name: routine.name, emoji: routine.emoji || null },
+    signal: 'possible_stall',
+    severity: missedTargetSessions >= 3 && bestEstimateChange < 0 ? 'high' : 'medium',
+    evidence: {
+      sessions_checked: checked.length,
+      latest_date: latest.workout.d,
+      best_estimate_change: bestEstimateChange,
+      missed_target_sessions: missedTargetSessions,
+      latest_target: currentTargetFor(cfg)
+    },
+    recent_sessions: checked.slice().reverse().map(({ workout: w, entry, best }) => ({
+      date: w.d,
+      workout_id: w.id || null,
+      routine_id: w.routineId || null,
+      routine_name: w.name || null,
+      top_set: topSetLabel(cfg.id, cfg, best),
+      sets_done: doneSetsOf(entry).length,
+      volume: entryVolume(entry)
+    }))
+  }
+}
+
+function severityRank(severity) {
+  return severity === 'high' ? 0 : 1
 }
 
 /* ---------- tools ---------- */
@@ -459,6 +550,34 @@ export const trainingSummary = {
   }
 }
 
+/** detect_stalls — conservative stagnation candidates with evidence. */
+export const detectStalls = {
+  name: 'detect_stalls',
+  description: 'Detect conservative stagnation candidates for reps-mode routine exercises. Returns evidence only — repeated missed targets, recent estimated-1RM change and recent sessions — so the AI coach can explain uncertainty instead of declaring a diagnosis.',
+  schema: {
+    window: z.number().int().min(3).max(8).optional().describe('Number of recent completed sessions to inspect per exercise. Defaults to 4.'),
+    routine_id: z.string().min(1).optional().describe('Optional routine id from list_routines/get_routine. Limits the scan to that routine.')
+  },
+  handler: ({ window, routine_id }) => {
+    const S = getState()
+    if (!S) return noState()
+    const win = Math.min(Math.max(window || 4, 3), 8)
+    const candidates = routinesToScan(S, routine_id)
+      .flatMap(routine => (routine.ex || []).map(cfg => stallCandidateFor(S, routine, cfg, win)))
+      .filter(Boolean)
+      .sort((a, b) =>
+        severityRank(a.severity) - severityRank(b.severity) ||
+        b.evidence.missed_target_sessions - a.evidence.missed_target_sessions ||
+        a.evidence.best_estimate_change - b.evidence.best_estimate_change ||
+        a.exercise.name.localeCompare(b.exercise.name))
+    return {
+      window: win,
+      unit: S.unit || 'kg',
+      candidates
+    }
+  }
+}
+
 /** get_bodyweight — recent weigh-ins with the goal line. */
 export const getBodyweight = {
   name: 'get_bodyweight',
@@ -624,7 +743,7 @@ export const progressionNext = {
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, getBodyweight, estimate1rm, muscleBalance, progressionNext
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext
 ]
 
 function noState() {

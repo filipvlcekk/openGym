@@ -67,7 +67,7 @@ the server's stderr.
 
 ## Tools
 
-Eleven read-only tools in this fork:
+Twelve read-only tools in this fork:
 
 | Tool | What it answers |
 |---|---|
@@ -78,6 +78,7 @@ Eleven read-only tools in this fork:
 | `get_workout` | Full set-by-set breakdown of one session, by `workout_id` or by date. On a day with two sessions the date alone returns both ids to pick from rather than guessing at one. |
 | `exercise_history` | Recent completed sessions for one exercise, newest first, with target, set labels and per-entry volume. |
 | `training_summary` | Compact period summary: workouts, sets, volume, PRs, bodyweight change, effort and muscle coverage. |
+| `detect_stalls` | Conservative reps-mode stagnation candidates with evidence, not a final coaching verdict. |
 | `get_bodyweight` | Weigh-ins with the latest weight, the goal line, and deltas vs goal. |
 | `estimate_1rm` | All-time best 1RM for an exercise + the trend, or a PR table across all exercises. |
 | `muscle_balance` | Which muscles I've trained this week/month/all-time, ranked + which I've neglected. |
@@ -115,10 +116,11 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-47 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+51 cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
-period training summaries, three 1RM formulas, and deterministic progression recommendations.
+period training summaries, conservative stall detection, three 1RM formulas, and deterministic
+progression recommendations.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -126,12 +128,14 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 ## Roadmap
 
 - **Done (Phase 1):** read-only stdio, 8 base tools, direct `./data` access.
-- **Done (Phase 1.5):** `progression_next`, `exercise_history` and `training_summary`
-  tools for better coaching reads. No new deps; small surface area.
+- **Done (Phase 1.5):** `progression_next`, `exercise_history`, `training_summary`
+  and `detect_stalls` tools for better coaching reads. No new deps; small surface area.
 - **Phase 2:** read+write over stdio. Requires a long-lived token auth path minted from the
   admin dashboard (new `./data/tokens.json`) and a write-lock against the web UI's read-modify-
   write of `state-<uid>.json`. Tools: `log_workout`, `add_bodyweight`, `edit_routine`,
   `assign_weekday`, `override_day`.
+  See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
+  token, scope, lock, revision, dry-run and audit design.
 - **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same
   tool implementations, second transport — the MCP SDK supports both behind one tool registration.
 

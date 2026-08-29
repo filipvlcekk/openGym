@@ -46,6 +46,86 @@ function sortedByDate(xs) {
   return xs.slice().sort((a, b) => (a.d || '').localeCompare(b.d || ''))
 }
 
+function workout(id, date, routineId, name, entries) {
+  return {
+    id,
+    d: date,
+    routineId,
+    name,
+    start: new Date(date + 'T10:00:00Z').getTime(),
+    end: new Date(date + 'T11:00:00Z').getTime(),
+    bw: null,
+    vol: 0,
+    prs: [],
+    entries
+  }
+}
+
+function entry(id, target, sets) {
+  return { id, target, sets: sets.map(s => ({ ...s, done: true })) }
+}
+
+function syntheticStallState() {
+  const pull = {
+    id: 'pull',
+    name: 'Pull Day',
+    emoji: null,
+    policy: 'linear',
+    ex: [
+      { id: '1323', sets: 3, reps: 10, weight: 55, mode: 'reps' },
+      { id: '0426', sets: 3, reps: 10, weight: 25, mode: 'reps' },
+      { id: 'synth-plank', sets: 3, sec: 60, mode: 'time' }
+    ]
+  }
+  const legs = {
+    id: 'legs',
+    name: 'Leg Day',
+    emoji: null,
+    policy: 'linear',
+    ex: [{ id: LEG_PRESS_ID, sets: 3, reps: 10, weight: 145, mode: 'reps' }]
+  }
+  const rowTarget = pull.ex[0]
+  const flyTarget = pull.ex[1]
+  const plankTarget = pull.ex[2]
+  const pressTarget = legs.ex[0]
+  return {
+    unit: 'kg',
+    routines: [pull, legs],
+    week: {},
+    dayPlan: {},
+    bodyweight: [],
+    exWeights: {},
+    workouts: [
+      workout('w1', '2026-07-01', 'pull', 'Pull Day', [
+        entry('1323', rowTarget, [{ w: 55, r: 8 }, { w: 55, r: 8 }, { w: 55, r: 7 }]),
+        entry('0426', flyTarget, [{ w: 20, r: 10 }, { w: 20, r: 10 }, { w: 20, r: 10 }]),
+        entry('synth-plank', plankTarget, [{ sec: 60 }, { sec: 60 }, { sec: 60 }])
+      ]),
+      workout('w2', '2026-07-08', 'pull', 'Pull Day', [
+        entry('1323', rowTarget, [{ w: 55, r: 8 }, { w: 55, r: 8 }, { w: 55, r: 8 }]),
+        entry('0426', flyTarget, [{ w: 22.5, r: 10 }, { w: 22.5, r: 10 }, { w: 22.5, r: 10 }])
+      ]),
+      workout('w3', '2026-07-15', 'pull', 'Pull Day', [
+        entry('1323', rowTarget, [{ w: 55, r: 8 }, { w: 55, r: 7 }, { w: 55, r: 7 }]),
+        entry('0426', flyTarget, [{ w: 25, r: 10 }, { w: 25, r: 10 }, { w: 25, r: 10 }])
+      ]),
+      workout('w4', '2026-07-22', 'pull', 'Pull Day', [
+        entry('1323', rowTarget, [{ w: 52.5, r: 8 }, { w: 52.5, r: 7 }, { w: 52.5, r: 7 }]),
+        entry('0426', flyTarget, [{ w: 27.5, r: 10 }, { w: 27.5, r: 10 }, { w: 27.5, r: 10 }])
+      ]),
+      workout('l1', '2026-07-03', 'legs', 'Leg Day', [
+        entry(LEG_PRESS_ID, pressTarget, [{ w: 145, r: 8 }, { w: 145, r: 8 }, { w: 145, r: 8 }])
+      ]),
+      workout('l2', '2026-07-10', 'legs', 'Leg Day', [
+        entry(LEG_PRESS_ID, pressTarget, [{ w: 145, r: 8 }, { w: 145, r: 7 }, { w: 145, r: 7 }])
+      ]),
+      workout('l3', '2026-07-17', 'legs', 'Leg Day', [
+        entry(LEG_PRESS_ID, pressTarget, [{ w: 142.5, r: 8 }, { w: 142.5, r: 7 }, { w: 142.5, r: 7 }])
+      ])
+    ]
+  }
+}
+
 // Pin "today" before building state so dayPlan/week alignment matches the assertions below.
 // `toFake: ['Date']` only — keeps fs.watch and the rest of the event loop real.
 beforeAll(() => {
@@ -706,6 +786,76 @@ describe('progression_next', () => {
   })
 })
 
+/* ---------- detect_stalls ---------- */
+
+describe('detect_stalls', () => {
+  test('returns conservative stall candidates with evidence and recent sessions', () => {
+    S = syntheticStallState()
+    _seedStateForTests(S)
+
+    const r = call('detect_stalls', { window: 4 })
+    expect(r.window).toBe(4)
+    expect(r.unit).toBe('kg')
+    expect(r.candidates.length).toBeGreaterThanOrEqual(2)
+
+    const row = r.candidates.find(c => c.exercise.id === '1323')
+    expect(row).toBeTruthy()
+    expect(row.exercise).toMatchObject({ id: '1323', mode: 'reps' })
+    expect(row.routine).toMatchObject({ id: 'pull', name: 'Pull Day' })
+    expect(row.signal).toBe('possible_stall')
+    expect(row.severity).toBe('high')
+    expect(row.evidence.sessions_checked).toBe(4)
+    expect(row.evidence.latest_date).toBe('2026-07-22')
+    expect(row.evidence.best_estimate_change).toBeLessThan(0)
+    expect(row.evidence.missed_target_sessions).toBe(4)
+    expect(row.evidence.latest_target).toMatchObject({ sets: 3, reps: 10, weight: 55 })
+    expect(row.recent_sessions).toHaveLength(4)
+    expect(row.recent_sessions[0]).toMatchObject({
+      date: '2026-07-22',
+      top_set: '52.5×8',
+      sets_done: 3
+    })
+    expect(row.recent_sessions[0].volume).toBeGreaterThan(0)
+  })
+
+  test('routine_id limits the scan to one routine', () => {
+    S = syntheticStallState()
+    _seedStateForTests(S)
+
+    const pull = call('detect_stalls', { window: 4, routine_id: 'pull' })
+    expect(pull.candidates.map(c => c.routine.id)).toEqual(['pull'])
+    expect(pull.candidates.map(c => c.exercise.id)).toContain('1323')
+    expect(pull.candidates.map(c => c.exercise.id)).not.toContain(LEG_PRESS_ID)
+
+    const legs = call('detect_stalls', { window: 4, routine_id: 'legs' })
+    expect(legs.candidates.map(c => c.routine.id)).toEqual(['legs'])
+    expect(legs.candidates.map(c => c.exercise.id)).toEqual([LEG_PRESS_ID])
+  })
+
+  test('skips improving reps exercises, non-reps modes and insufficient history', () => {
+    S = syntheticStallState()
+    S.workouts = S.workouts.slice(0, 2)
+    _seedStateForTests(S)
+
+    const none = call('detect_stalls', { window: 4 })
+    expect(none.candidates).toEqual([])
+
+    S = syntheticStallState()
+    _seedStateForTests(S)
+    const pull = call('detect_stalls', { window: 4, routine_id: 'pull' })
+    expect(pull.candidates.map(c => c.exercise.id)).toEqual(['1323'])
+    expect(pull.candidates.map(c => c.exercise.id)).not.toContain('0426')
+    expect(pull.candidates.map(c => c.exercise.id)).not.toContain('synth-plank')
+  })
+
+  test('throws ENOENT for an unknown routine filter', () => {
+    S = syntheticStallState()
+    _seedStateForTests(S)
+
+    expect(() => call('detect_stalls', { routine_id: 'missing' })).toThrow()
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -724,7 +874,8 @@ describe('shared: no-state fallback', () => {
       muscle_balance: { period: 'all' },
       progression_next: { routine_id: 'routine', exercise_id: 'exercise' },
       exercise_history: { exercise_id: 'exercise' },
-      training_summary: { period: '6w' }
+      training_summary: { period: '6w' },
+      detect_stalls: { window: 4 }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

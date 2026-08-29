@@ -168,6 +168,7 @@ Tento fork k tomu ve Phase 1.5 přidává:
 | `progression_next` | další předepsaný target podle openGym progression engine |
 | `exercise_history` | poslední dokončené sessions pro jeden cvik bez tahání celých workoutů |
 | `training_summary` | kompaktní periodické shrnutí workoutů, váhy, effortu a muscle coverage |
+| `detect_stalls` | konzervativní kandidáti stagnace s důkazy, ne finální verdikt |
 
 Upstream MCP používá stejné pure helper funkce jako frontend, mimo jiné logiku pro:
 
@@ -456,6 +457,7 @@ Tento fork nyní přidává nástroje:
 progression_next
 exercise_history
 training_summary
+detect_stalls
 ```
 
 `progression_next` odpovídá na otázku:
@@ -475,6 +477,12 @@ To snižuje množství surových dat v kontextu, protože agent nemusí tahat ce
 > Jak vypadá poslední týden, měsíc, 6 týdnů, 12 týdnů nebo celá historie v kompaktním souhrnu?
 
 To dává agentovi bezpečný základ pro review bez toho, aby si sám skládal statistiky z kompletní historie.
+
+`detect_stalls` odpovídá na otázku:
+
+> Které reps-mode cviky vypadají podle posledních sessions jako možní kandidáti stagnace?
+
+Vrací důkazy, ne diagnózu ani automatické doporučení změny.
 
 Skutečný výstup `progression_next` v tomto forku:
 
@@ -698,6 +706,7 @@ estimate_1rm
 muscle_balance
 progression_next
 training_summary
+detect_stalls
 ```
 
 ## Write operace s potvrzením
@@ -1374,6 +1383,8 @@ Vrátí kandidáty na stagnaci.
 
 AI pak interpretuje.
 
+Hotovo v tomto forku.
+
 ---
 
 # 29. Proč část analýzy dělat mimo LLM
@@ -1913,6 +1924,7 @@ Přidat:
 progression_next   hotovo
 exercise_history   hotovo
 training_summary   hotovo
+detect_stalls      hotovo
 ```
 
 Výsledek:
@@ -1933,6 +1945,14 @@ override_day
 assign_weekday
 edit_routine
 ```
+
+Detailní architektonický návrh Phase 2 je v samostatném dokumentu:
+
+```text
+docs/MCP_WRITE_ARCHITECTURE.md
+```
+
+Základní rozhodnutí: nejdřív vytvořit sdílenou `updateUserState(uid, mutation, options)` vrstvu s per-user lockem, revision konflikty, atomickým zápisem a audit logem. Až nad ní stavět jednotlivé write tooly.
 
 Současně:
 
@@ -2008,9 +2028,10 @@ Nejrozumnější první milestone:
 3. přidat progression_next
 4. přidat exercise_history
 5. přidat training_summary
-6. vytvořit system prompt AI Coache
-7. několik týdnů používat read-only verzi
-8. zjistit, které write akce reálně chybí
+6. přidat detect_stalls
+7. vytvořit system prompt AI Coache
+8. několik týdnů používat read-only verzi
+9. zjistit, které write akce reálně chybí
 ```
 
 Až potom implementovat write.
@@ -2180,7 +2201,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví a má jedenáct read-only toolů včetně `progression_next`, `exercise_history` a `training_summary`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví a má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 
@@ -2251,12 +2272,13 @@ Tento dokument kombinuje dvě kategorie informací:
 Patří sem zejména:
 
 - read-only stdio MCP,
-- jedenáct read tools v tomto forku,
+- dvanáct read tools v tomto forku,
 - přímé čtení `./data`,
 - reuse frontend training helpers,
 - hotový `progression_next`,
 - hotový `exercise_history`,
 - hotový `training_summary`,
+- hotový `detect_stalls`,
 - roadmapa write tools,
 - plán token auth,
 - plán write-locku,
