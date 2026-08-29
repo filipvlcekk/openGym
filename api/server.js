@@ -9,6 +9,7 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
+import { createAuditService } from './audit-service.js';
 import { createMcpTokenRoutes } from './mcp-token-routes.js';
 import { atomicWrite, createStateService } from './state-service.js';
 import { createTokenService } from './token-service.js';
@@ -32,7 +33,8 @@ const MAX_BODY = 5 * 1024 * 1024;
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
 fs.mkdirSync(DATA, { recursive: true });
-const states = createStateService({ dataDir: DATA });
+const audit = createAuditService({ dataDir: DATA });
+const states = createStateService({ dataDir: DATA, audit });
 const tokens = createTokenService({ dataDir: DATA });
 
 /* ---------- secret + db ---------- */
@@ -382,7 +384,10 @@ const routes = {
     if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
-    const result = states.replaceUserState(user.id, body.state); // in-progress workouts stay device-local
+    const result = states.replaceUserState(user.id, body.state, {
+      actor: `web-session:${user.id}`,
+      details: { source: 'PUT /api/data' }
+    }); // in-progress workouts stay device-local
     json(res, 200, result);
   },
 

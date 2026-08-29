@@ -21,7 +21,7 @@ export function atomicWrite(file, content) {
   fs.renameSync(tmp, file);
 }
 
-export function createStateService({ dataDir }) {
+export function createStateService({ dataDir, audit = null }) {
   const stateFile = uid => path.join(dataDir, 'state-' + safeUid(uid) + '.json');
   const lockFile = uid => path.join(dataDir, 'locks', 'state-' + safeUid(uid) + '.lock');
 
@@ -102,12 +102,21 @@ export function createStateService({ dataDir }) {
       delete next.active;
       next._revision = currentRevision + 1;
       atomicWrite(stateFile(uid), JSON.stringify(next));
+      audit?.appendAuditEvent({
+        uid: safeUid(uid),
+        actor: options.actor || 'unknown',
+        action: options.operation || 'state-write',
+        token_id: options.tokenId || undefined,
+        revision_before: currentRevision,
+        revision_after: next._revision,
+        details: options.details || undefined
+      });
       return { ok: true, revision: next._revision, ts: next._ts || null };
     }, options.lock);
   }
 
-  function replaceUserState(uid, state) {
-    const result = updateUserState(uid, () => state, { operation: 'replace-state' });
+  function replaceUserState(uid, state, options = {}) {
+    const result = updateUserState(uid, () => state, { ...options, operation: options.operation || 'replace-state' });
     if (!result.ok) return result;
     return { ok: true, ts: result.ts };
   }

@@ -4,13 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createAuditService } from '../audit-service.js';
 import { createStateService } from '../state-service.js';
 
-function withTempStateService(fn) {
+function withTempStateService(fn, options = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-state-service-'));
   try {
-    const states = createStateService({ dataDir });
-    fn(states);
+    const audit = options.audit ? createAuditService({ dataDir }) : null;
+    const states = createStateService({ dataDir, audit });
+    fn(states, audit);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
@@ -94,4 +96,48 @@ test('updateUserState removes the per-user lock when a mutation throws', () => {
 
     assert.equal(fs.existsSync(states.lockFile(uid)), false);
   });
+});
+
+test('updateUserState appends an audit event after a committed write', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify({ _revision: 4, unit: 'kg' }));
+
+    states.updateUserState(uid, current => ({ ...current, unit: 'lb' }), {
+      actor: 'mcp-token:tok_1',
+      tokenId: 'tok_1',
+      operation: 'assign_weekday',
+      expectedRevision: 4,
+      details: { weekday: 1, routine_id: 'r1' }
+    });
+
+    const events = audit.readAuditEvents();
+    assert.equal(events.length, 1);
+    assert.deepEqual(events, [{
+      timestamp: events[0].timestamp,
+      uid,
+      actor: 'mcp-token:tok_1',
+      action: 'assign_weekday',
+      token_id: 'tok_1',
+      revision_before: 4,
+      revision_after: 5,
+      details: { weekday: 1, routine_id: 'r1' }
+    }]);
+  }, { audit: true });
+});
+
+test('updateUserState does not append a commit audit event for stale revision conflicts', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify({ _revision: 2, unit: 'kg' }));
+
+    const result = states.updateUserState(uid, current => ({ ...current, unit: 'lb' }), {
+      actor: 'mcp-token:tok_1',
+      operation: 'assign_weekday',
+      expectedRevision: 1
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(audit.readAuditEvents(), []);
+  }, { audit: true });
 });
