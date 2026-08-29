@@ -1960,7 +1960,8 @@ Stav k 2026-08-29:
 - hotovo: `_revision` + per-user lock v `updateUserState`,
 - hotovo: `PUT /api/data` používá state service,
 - hotovo: `api/token-service.js` pro hashované tokeny, scopes a revokaci,
-- zbývá: token management HTTP routes, MCP token auth wiring, audit log, dry-run write tools a užší validace mutací.
+- hotovo: token management HTTP routes pro vytvoření, výpis a revokaci tokenů,
+- zbývá: MCP token auth wiring, audit log, dry-run write tools a užší validace mutací.
 
 Současně:
 

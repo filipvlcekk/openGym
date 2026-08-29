@@ -9,7 +9,9 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
+import { createMcpTokenRoutes } from './mcp-token-routes.js';
 import { atomicWrite, createStateService } from './state-service.js';
+import { createTokenService } from './token-service.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -31,6 +33,7 @@ const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
 fs.mkdirSync(DATA, { recursive: true });
 const states = createStateService({ dataDir: DATA });
+const tokens = createTokenService({ dataDir: DATA });
 
 /* ---------- secret + db ---------- */
 const secretFile = path.join(DATA, 'secret');
@@ -365,6 +368,8 @@ const routes = {
     saveDb();
     json(res, 200, { ok: true }, { 'Set-Cookie': clearCookie });
   },
+
+  ...createMcpTokenRoutes({ tokens, readSession, readBody, json }),
 
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
