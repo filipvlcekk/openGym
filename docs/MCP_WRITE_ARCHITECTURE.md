@@ -6,6 +6,15 @@ Phase 1 and Phase 1.5 are read-only: the MCP server reads `state-<uid>.json` and
 
 The design goal is simple: every write must be authenticated, scoped, validated, conflict-safe, auditable and reversible by normal openGym state recovery.
 
+## Implementation Status
+
+As of 2026-08-29:
+
+- Done: `api/state-service.js` owns API state reads and full-state replacement.
+- Done: `updateUserState(uid, mutation, options)` supports per-user locks, `_revision` increments and optional `expectedRevision` conflict checks.
+- Done: `PUT /api/data` goes through the state service while keeping the existing response shape.
+- Not done: MCP token auth, scopes, audit log, dry-run write tools and narrower mutation validation.
+
 ## Current State
 
 The API server is a single Node process in `api/server.js`.
@@ -458,9 +467,9 @@ Do not split first just for neatness; split when it reduces real complexity.
 
 ## Implementation Order
 
-1. Extract API state read/write into `api/state-service.js` without behavior changes.
-2. Add `_revision` handling and per-user lock inside `updateUserState`.
-3. Change `PUT /api/data` to use `updateUserState`.
+1. Done: Extract API state read/write into `api/state-service.js` without behavior changes.
+2. Done: Add `_revision` handling and per-user lock inside `updateUserState`.
+3. Done: Change `PUT /api/data` to use `updateUserState`.
 4. Add token service and token management API.
 5. Add MCP write auth from `OPENGYM_MCP_TOKEN`.
 6. Implement `override_day` with dry-run first.

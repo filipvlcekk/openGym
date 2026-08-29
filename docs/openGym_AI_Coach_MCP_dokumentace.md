@@ -1954,6 +1954,13 @@ docs/MCP_WRITE_ARCHITECTURE.md
 
 Základní rozhodnutí: nejdřív vytvořit sdílenou `updateUserState(uid, mutation, options)` vrstvu s per-user lockem, revision konflikty, atomickým zápisem a audit logem. Až nad ní stavět jednotlivé write tooly.
 
+Stav k 2026-08-29:
+
+- hotovo: `api/state-service.js`,
+- hotovo: `_revision` + per-user lock v `updateUserState`,
+- hotovo: `PUT /api/data` používá state service,
+- zbývá: token auth, scopes, audit log, dry-run write tools a užší validace mutací.
+
 Současně:
 
 - token auth,
