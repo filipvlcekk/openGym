@@ -9,6 +9,7 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
+import { atomicWrite, createStateService } from './state-service.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -29,6 +30,7 @@ const MAX_BODY = 5 * 1024 * 1024;
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
 fs.mkdirSync(DATA, { recursive: true });
+const states = createStateService({ dataDir: DATA });
 
 /* ---------- secret + db ---------- */
 const secretFile = path.join(DATA, 'secret');
@@ -42,15 +44,7 @@ db.subs = db.subs || [];
 db.invites = db.invites || [];
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
-function atomicWrite(file, content) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
-}
-const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
-function readState(uid) {
-  try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
-}
+const readState = uid => states.readUserState(uid);
 
 /* ---------- push notifications (Web Push / VAPID) ---------- */
 const vapidFile = path.join(DATA, 'vapid.json');
@@ -375,10 +369,7 @@ const routes = {
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    try {
-      const state = JSON.parse(fs.readFileSync(stateFile(user.id), 'utf8'));
-      json(res, 200, { state });
-    } catch { json(res, 200, { state: null }); }
+    json(res, 200, { state: states.readUserState(user.id) });
   },
 
   'PUT /api/data': async (req, res) => {
@@ -386,9 +377,8 @@ const routes = {
     if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
-    delete body.state.active;              // in-progress workouts stay device-local
-    atomicWrite(stateFile(user.id), JSON.stringify(body.state));
-    json(res, 200, { ok: true, ts: body.state._ts || null });
+    const result = states.replaceUserState(user.id, body.state); // in-progress workouts stay device-local
+    json(res, 200, result);
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
