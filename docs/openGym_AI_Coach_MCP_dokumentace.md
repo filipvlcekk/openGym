@@ -1961,7 +1961,8 @@ Stav k 2026-08-29:
 - hotovo: `PUT /api/data` používá state service,
 - hotovo: `api/token-service.js` pro hashované tokeny, scopes a revokaci,
 - hotovo: token management HTTP routes pro vytvoření, výpis a revokaci tokenů,
-- zbývá: MCP token auth wiring, audit log, dry-run write tools a užší validace mutací.
+- hotovo: MCP token auth wiring přes `OPENGYM_MCP_TOKEN`,
+- zbývá: audit log, dry-run write tools a užší validace mutací.
 
 Současně:
 

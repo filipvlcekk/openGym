@@ -15,7 +15,8 @@ As of 2026-08-29:
 - Done: `PUT /api/data` goes through the state service while keeping the existing response shape.
 - Done: `api/token-service.js` can create, verify, scope-check, list and revoke hashed MCP tokens.
 - Done: authenticated token management HTTP routes exist for create, list and revoke.
-- Not done: MCP token auth wiring, audit log, dry-run write tools and narrower mutation validation.
+- Done: `mcp/src/write-auth.js` verifies `OPENGYM_MCP_TOKEN` with optional required scopes.
+- Not done: audit log, dry-run write tools and narrower mutation validation.
 
 ## Current State
 
@@ -473,7 +474,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 2. Done: Add `_revision` handling and per-user lock inside `updateUserState`.
 3. Done: Change `PUT /api/data` to use `updateUserState`.
 4. Done: Add token service and token management API.
-5. Add MCP write auth from `OPENGYM_MCP_TOKEN`.
+5. Done: Add MCP write auth from `OPENGYM_MCP_TOKEN`.
 6. Implement `override_day` with dry-run first.
 7. Implement `assign_weekday`.
 8. Implement narrow `edit_routine` patch ops.
