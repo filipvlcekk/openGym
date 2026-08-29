@@ -609,6 +609,8 @@ Slouží pro strukturální úpravu programu.
 
 Operace by měla být co nejvíce explicitní.
 
+Aktuální implementace v tomto forku je záměrně užší: `edit_routine` umí patchovat existující rutinu pomocí `set_policy` a `set_exercise_target`. Neumí zatím přidat cvik, odebrat cvik ani měnit pořadí cviků.
+
 Nevhodné:
 
 ```json
@@ -644,6 +646,8 @@ set_progression_policy
 ```
 
 Výhodou je menší prostor pro chybný nebo destruktivní zápis.
+
+Současný MCP kontrakt používá název `policy`, ale openGym frontend ukládá rutinní progression do pole `prog`. MCP vrstva proto tuto hranici normalizuje: navenek ukazuje `policy`, do state zapisuje kompatibilní `prog`.
 
 ---
 
@@ -1965,7 +1969,8 @@ Stav k 2026-08-30:
 - hotovo: scrubovaný JSONL audit log pro úspěšné state writy,
 - hotovo: první MCP write tool `override_day` s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
-- zbývá: `edit_routine` a užší validace mutací.
+- hotovo: první úzký `edit_routine` pro `set_policy` a `set_exercise_target` na existující rutině/cviku s `routine:write`, dry-run, revision checkem a audit commitem,
+- zbývá: širší routine editor operace, například přidání, odebrání a přeřazení cviků, a užší validace mutací.
 
 Současně:
 
@@ -2214,7 +2219,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a první scoped write tool `override_day`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a tři scoped write tooly: `override_day`, `assign_weekday` a první úzký `edit_routine`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

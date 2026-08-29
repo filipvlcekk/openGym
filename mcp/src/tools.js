@@ -18,7 +18,7 @@ import {
 } from '../../frontend/src/lib/onerm.js'
 import { loadOfWorkouts, rankOf, levelsOf } from '../../frontend/src/lib/muscles.js'
 import { displayScale, effortSummary, scaleName } from '../../frontend/src/lib/effort.js'
-import { nextPrescription } from '../../frontend/src/lib/progression.js'
+import { POLICIES, nextPrescription } from '../../frontend/src/lib/progression.js'
 
 /* ---------- helpers ---------- */
 
@@ -262,6 +262,141 @@ function revisionOf(S) {
   return Number.isInteger(revision) && revision >= 0 ? revision : 0
 }
 
+const ROUTINE_POLICY_SET = new Set(POLICIES)
+const TARGET_FIELD_RULES = {
+  sets: { integer: true, min: 1 },
+  reps: { integer: true, min: 1 },
+  weight: { min: 0 },
+  inc: { min: 0 },
+  repsMin: { integer: true, min: 1 },
+  repsMax: { integer: true, min: 1 },
+  sec: { integer: true, min: 1 },
+  min: { min: 1 },
+  speed: { min: 0 }
+}
+const TARGET_FIELDS = new Set(Object.keys(TARGET_FIELD_RULES))
+const setPolicyOpSchema = z.object({
+  op: z.literal('set_policy'),
+  policy: z.enum(['off', 'linear', 'greyskull', 'double', 'time'])
+}).strict()
+const setExerciseTargetOpSchema = z.object({
+  op: z.literal('set_exercise_target'),
+  exercise_id: z.string().min(1),
+  sets: z.number().int().min(1).optional(),
+  reps: z.number().int().min(1).optional(),
+  weight: z.number().min(0).optional(),
+  inc: z.number().min(0).optional(),
+  repsMin: z.number().int().min(1).optional(),
+  repsMax: z.number().int().min(1).optional(),
+  sec: z.number().int().min(1).optional(),
+  min: z.number().min(1).optional(),
+  speed: z.number().min(0).optional()
+}).strict()
+
+function routinePolicy(routine) {
+  return routine?.prog || routine?.policy || 'off'
+}
+
+function fail(code, message) {
+  const e = new Error(message)
+  e.code = code
+  throw e
+}
+
+function requireRoutineById(S, routineId) {
+  const routine = (S.routines || []).find(r => r.id === routineId)
+  if (!routine) fail('ENOENT', `no routine with id ${JSON.stringify(routineId)}`)
+  return routine
+}
+
+function requireRoutineExercise(routine, exerciseId) {
+  const cfg = (routine.ex || []).find(e => e.id === exerciseId)
+  if (!cfg) fail('ENOENT', `routine ${JSON.stringify(routine.id)} has no exercise with id ${JSON.stringify(exerciseId)}`)
+  return cfg
+}
+
+function validateTargetField(field, value) {
+  const rule = TARGET_FIELD_RULES[field]
+  if (!rule) fail('EINVAL', `unsupported exercise target field ${JSON.stringify(field)}`)
+  if (typeof value !== 'number' || !Number.isFinite(value)) fail('EINVAL', `${field} must be a finite number`)
+  if (rule.integer && !Number.isInteger(value)) fail('EINVAL', `${field} must be an integer`)
+  if (value < rule.min) fail('EINVAL', `${field} must be >= ${rule.min}`)
+}
+
+function validateEditRoutineOps(routine, ops) {
+  if (!Array.isArray(ops) || !ops.length) fail('EINVAL', 'edit_routine needs at least one op')
+  if (ops.length > 10) fail('EINVAL', 'edit_routine accepts at most 10 ops')
+  for (const op of ops) {
+    if (!op || typeof op !== 'object') fail('EINVAL', 'edit op must be an object')
+    if (op.op === 'set_policy') {
+      if (!ROUTINE_POLICY_SET.has(op.policy)) fail('EINVAL', `unknown policy ${JSON.stringify(op.policy)}`)
+      continue
+    }
+    if (op.op === 'set_exercise_target') {
+      requireRoutineExercise(routine, op.exercise_id)
+      const fields = Object.keys(op).filter(field => TARGET_FIELDS.has(field))
+      if (!fields.length) fail('EINVAL', 'set_exercise_target needs at least one target field')
+      for (const field of Object.keys(op)) {
+        if (field === 'op' || field === 'exercise_id') continue
+        validateTargetField(field, op[field])
+      }
+      if (op.repsMin != null && op.repsMax != null && op.repsMax < op.repsMin) {
+        fail('EINVAL', 'repsMax must be >= repsMin')
+      }
+      continue
+    }
+    fail('EINVAL', `unknown edit op ${JSON.stringify(op.op)}`)
+  }
+}
+
+function editRoutineChanges(S, routineId, ops) {
+  const routine = requireRoutineById(S, routineId)
+  validateEditRoutineOps(routine, ops)
+
+  const changes = []
+  const pushChange = (path, before, after) => {
+    if (!Object.is(before, after)) changes.push({ path, before, after })
+  }
+
+  for (const op of ops) {
+    if (op.op === 'set_policy') {
+      pushChange(`routines.${routine.id}.policy`, routinePolicy(routine), op.policy)
+      continue
+    }
+
+    const cfg = requireRoutineExercise(routine, op.exercise_id)
+    for (const field of Object.keys(op)) {
+      if (!TARGET_FIELDS.has(field)) continue
+      pushChange(`routines.${routine.id}.ex.${cfg.id}.${field}`, cfg[field] ?? null, op[field])
+    }
+  }
+  return changes
+}
+
+function applyEditRoutineOps(current, routineId, ops) {
+  const routine = requireRoutineById(current, routineId)
+  validateEditRoutineOps(routine, ops)
+  return {
+    ...current,
+    routines: (current.routines || []).map(r => {
+      if (r.id !== routineId) return r
+      const next = { ...r, ex: (r.ex || []).map(cfg => ({ ...cfg })) }
+      for (const op of ops) {
+        if (op.op === 'set_policy') {
+          next.prog = op.policy
+          delete next.policy
+          continue
+        }
+        const cfg = requireRoutineExercise(next, op.exercise_id)
+        for (const field of Object.keys(op)) {
+          if (TARGET_FIELDS.has(field)) cfg[field] = op[field]
+        }
+      }
+      return next
+    })
+  }
+}
+
 function requireOverrideTarget(S, routineId) {
   if (routineId === 'rest') return 'rest'
   const routine = (S.routines || []).find(r => r.id === routineId)
@@ -319,7 +454,7 @@ export const listRoutines = {
         emoji: r.emoji || null,
         exercise_count: (r.ex || []).length,
         superset_groups: [...new Set((r.ex || []).map(e => e.sg).filter(Boolean))].length || 0,
-        policy: r.policy || 'off'
+        policy: routinePolicy(r)
       }))
     }
   }
@@ -339,8 +474,8 @@ export const getRoutine = {
       id: r.id,
       name: r.name,
       emoji: r.emoji || null,
-      policy: r.policy || 'off',
-      policy_name: policyName(r.policy || 'off'),
+      policy: routinePolicy(r),
+      policy_name: policyName(routinePolicy(r)),
       unit: S.unit || 'kg',
       exercises: (r.ex || []).map((cfg, i) => {
         const ex = exOr(cfg.id)
@@ -359,7 +494,7 @@ export const getRoutine = {
           speed: mode === 'cardio' ? (cfg.speed || 0) : undefined,
           weight: cfg.weight != null ? cfg.weight : undefined,
           increment: cfg.inc != null ? cfg.inc : undefined,
-          policy_override: cfg.policy || null,
+          policy_override: cfg.prog || cfg.policy || null,
           superset_group: cfg.sg || null,
           summary: exLine(cfg, S.unit || 'kg')
         }
@@ -948,10 +1083,85 @@ export const assignWeekday = {
   }
 }
 
+/** edit_routine — write narrow patch operations against an existing routine. */
+export const editRoutine = {
+  name: 'edit_routine',
+  description: 'Patch an existing routine. Requires OPENGYM_MCP_TOKEN with routine:write. Supports set_policy and set_exercise_target ops only; use dry_run=true first to preview exact changes before committing.',
+  schema: {
+    routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine.'),
+    ops: z.array(z.discriminatedUnion('op', [setPolicyOpSchema, setExerciseTargetOpSchema])).min(1).max(10).describe('Patch operations to apply in order.'),
+    expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+    dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
+  },
+  handler: ({ routine_id, ops, expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'routine:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const changes = editRoutineChanges(S, routine_id, ops)
+    const revision = revisionOf(S)
+
+    if (dry_run) {
+      return {
+        ok: true,
+        dry_run: true,
+        would_change: changes.length > 0,
+        revision,
+        changes
+      }
+    }
+
+    if (!changes.length) {
+      if (expected_revision !== revision) {
+        return {
+          ok: false,
+          error: {
+            code: 'STATE_CONFLICT',
+            message: 'State changed since the tool read it.',
+            current_revision: revision
+          }
+        }
+      }
+      return {
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: revision,
+        revision_after: revision,
+        changes
+      }
+    }
+
+    const result = states.updateUserState(auth.token.uid, current => {
+      return applyEditRoutineOps(current, routine_id, ops)
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'edit_routine',
+      expectedRevision: expected_revision,
+      details: { routine_id, ops: ops.map(op => ({ ...op })) }
+    })
+    if (!result.ok) return result
+
+    return {
+      ok: true,
+      dry_run: false,
+      changed: true,
+      revision_before: revision,
+      revision_after: result.revision,
+      changes
+    }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine
 ]
 
 function noState() {

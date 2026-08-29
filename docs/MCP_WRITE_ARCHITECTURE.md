@@ -19,7 +19,8 @@ As of 2026-08-30:
 - Done: `api/audit-service.js` writes scrubbed JSONL audit events for committed state writes.
 - Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
-- Not done: `edit_routine` and narrower mutation validation.
+- Done: `edit_routine` supports the first narrow patch ops with `routine:write`: `set_policy` and `set_exercise_target` for existing routines/exercises.
+- Not done: broader routine editing ops such as add/remove/reorder exercises and narrower full-state mutation validation.
 
 ## Current State
 
@@ -279,7 +280,7 @@ edit_routine
 }
 ```
 
-`edit_routine` should be patch-based, not whole-routine replacement:
+`edit_routine` is patch-based, not whole-routine replacement. The first implemented ops are limited to existing routines and existing exercises:
 
 ```json
 {
@@ -292,6 +293,8 @@ edit_routine
   "dry_run": true
 }
 ```
+
+The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary.
 
 ## Dry Run
 
@@ -480,7 +483,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 5. Done: Add MCP write auth from `OPENGYM_MCP_TOKEN`.
 6. Done: Implement `override_day` with dry-run first.
 7. Done: Implement `assign_weekday`.
-8. Implement narrow `edit_routine` patch ops.
+8. Done: Implement narrow `edit_routine` patch ops for routine policy and existing exercise targets.
 9. Done: Add audit log tests and conflict tests.
 
 ## Testing Strategy
@@ -517,7 +520,6 @@ Regression test for the main failure mode:
 
 - Whether token creation is user-self-service or admin-only in the first version.
 - Whether `PUT /api/data` should require `expected_revision` immediately or accept it optionally during a compatibility window.
-- Exact maximum operation count for `edit_routine`.
 - Whether audit events should rotate by size or date.
 
 ## Recommendation
@@ -530,6 +532,7 @@ token-service + scopes
 override_day
 assign_weekday
 edit_routine
+future: log_workout, add_bodyweight, broader routine editor ops
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.
