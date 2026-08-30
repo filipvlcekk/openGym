@@ -552,6 +552,7 @@ Pro AI coach použití jsou nejdůležitější:
 edit_routine
 assign_weekday
 override_day
+log_workout
 ```
 
 ---
@@ -653,17 +654,49 @@ Současný MCP kontrakt používá název `policy`, ale openGym frontend uklád�
 
 ## 11.4 `log_workout`
 
-V první AI Coach verzi není nutně potřeba.
+V tomto forku je `log_workout` implementovaný jako strukturovaný zápis hotového workoutu podle existující rutiny.
 
-Workout bude pravděpodobně pohodlnější zapisovat přes openGym UI.
+LLM funguje jako parser z přirozeného jazyka do JSON. MCP samotné přirozený jazyk neparsuje, nehledá freestyle cviky a nevytváří nové cviky. Dostane už validovaný návrh nad existující rutinou a zapíše ho přes state-service.
 
-Může být užitečný pro hlasové nebo chatové zadávání:
+Použití:
 
 ```text
 Zapiš deadlift 140 × 5, 140 × 5, 140 × 4.
 ```
 
-Tato funkce by však vyžadovala velmi dobrou validaci.
+Příklad MCP payloadu:
+
+```json
+{
+  "routine_id": "push",
+  "date": "2026-08-30",
+  "duration_min": 62,
+  "bodyweight": 78.4,
+  "entries": [
+    {
+      "exercise_id": "0426",
+      "sets": [
+        { "w": 25, "r": 10 },
+        { "w": 25, "r": 8 }
+      ]
+    }
+  ],
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+První verze umí:
+
+- zapsat hotový workout pro existující `routine_id`,
+- povolit jen cviky, které jsou v dané rutině,
+- validovat reps/time/cardio tvar setů,
+- uložit sety jako `done: true`,
+- zkopírovat target z rutiny do workout historie,
+- spočítat `vol`, `prs` a aktualizovat `exWeights`,
+- použít `workout:write`, `dry_run`, `expected_revision` a audit commit.
+
+Neumí zatím freestyle workout, fuzzy matching názvů cviků, přidání nového cviku ani editaci už existujícího workoutu.
 
 ---
 
@@ -1950,6 +1983,7 @@ override_day
 assign_weekday
 edit_routine
 add_bodyweight
+log_workout
 ```
 
 Detailní architektonický návrh Phase 2 je v samostatném dokumentu:
@@ -1973,8 +2007,9 @@ Stav k 2026-08-30:
 - hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: první úzký `edit_routine` pro `set_policy` a `set_exercise_target` na existující rutině/cviku s `routine:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
+- hotovo: `log_workout` pro zapsání hotového workoutu podle existující rutiny se `workout:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
-- zbývá: `log_workout`, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a hlubší validace workout setů.
+- zbývá: freestyle workout logging, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a hlubší sdílená validace workout setů.
 
 Současně:
 
@@ -2223,7 +2258,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a čtyři scoped write tooly: `override_day`, `assign_weekday`, první úzký `edit_routine` a `add_bodyweight`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a pět scoped write toolů: `override_day`, `assign_weekday`, první úzký `edit_routine`, `add_bodyweight` a `log_workout`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

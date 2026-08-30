@@ -128,6 +128,30 @@ function bodyweightWriteState() {
   }
 }
 
+function workoutWriteState() {
+  const push = {
+    id: 'push',
+    name: 'Push Day',
+    emoji: 'P',
+    prog: 'linear',
+    ex: [
+      { id: '0426', sets: 3, reps: 10, weight: 25, mode: 'reps', inc: 2.5 },
+      { id: 'plank', sets: 2, sec: 45, weight: 0, mode: 'time' }
+    ]
+  }
+  return {
+    ...writeToolState(),
+    routines: [push],
+    workouts: [
+      workout('old1', '2026-08-01', 'push', 'Push Day', [
+        entry('0426', push.ex[0], [{ w: 20, r: 10 }])
+      ])
+    ],
+    exWeights: { '0426': { w: 20, d: '2026-08-01' } },
+    bodyweight: []
+  }
+}
+
 function withWriteToolEnv({ scopes = ['schedule:write'], state = writeToolState() } = {}, fn) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-override-day-'))
   const prevData = process.env.OPENGYM_DATA
@@ -1493,6 +1517,204 @@ describe('add_bodyweight', () => {
   })
 })
 
+/* ---------- log_workout ---------- */
+
+describe('log_workout', () => {
+  test('previews a structured workout without writing or auditing', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: workoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        bodyweight: 78.4,
+        entries: [
+          { exercise_id: '0426', sets: [{ w: 25, r: 10 }, { w: 25, r: 8 }] },
+          { exercise_id: 'plank', sets: [{ sec: 60, w: 0 }] }
+        ],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        unit: 'kg',
+        workout: {
+          date: '2026-08-30',
+          routine_id: 'push',
+          name: 'Push Day',
+          sets_done: 3,
+          volume: 450,
+          prs: ['0426'],
+          bodyweight: 78.4
+        },
+        changes: [
+          { path: 'workouts', before: 1, after: 2 },
+          { path: 'exWeights.0426', before: 20, after: 25 }
+        ]
+      })
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commits a finished workout and updates PR weights through state-service', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: workoutWriteState() }, ({ dataDir, token }) => {
+      const r = call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        bodyweight: 78.4,
+        entries: [
+          { exercise_id: '0426', sets: [{ w: 25, r: 10 }, { w: 25, r: 8 }] },
+          { exercise_id: 'plank', sets: [{ sec: 60, w: 0 }] }
+        ],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        workout: {
+          date: '2026-08-30',
+          routine_id: 'push',
+          name: 'Push Day',
+          sets_done: 3,
+          volume: 450,
+          prs: ['0426'],
+          bodyweight: 78.4
+        }
+      })
+      expect(typeof r.workout.id).toBe('string')
+
+      const saved = readDiskState(dataDir)
+      expect(saved._revision).toBe(8)
+      expect(saved.workouts).toHaveLength(2)
+      expect(saved.workouts[1]).toMatchObject({
+        id: r.workout.id,
+        d: '2026-08-30',
+        routineId: 'push',
+        name: 'Push Day',
+        bw: 78.4,
+        vol: 450,
+        prs: ['0426']
+      })
+      expect(saved.workouts[1].entries[0].target).toMatchObject({ id: '0426', sets: 3, reps: 10, weight: 25 })
+      expect(saved.workouts[1].entries[0].sets).toEqual([
+        { w: 25, r: 10, done: true },
+        { w: 25, r: 8, done: true }
+      ])
+      expect(saved.workouts[1].entries[1].sets).toEqual([{ sec: 60, w: 0, done: true }])
+      expect(saved.exWeights['0426']).toEqual({ w: 25, d: '2026-08-30' })
+
+      expect(readAuditEvents(dataDir)).toMatchObject([{
+        actor: `mcp-token:${token.id}`,
+        token_id: token.id,
+        action: 'log_workout',
+        details: { date: '2026-08-30', routine_id: 'push', workout_id: r.workout.id, sets_done: 3, volume: 450 }
+      }])
+    })
+  })
+
+  test('returns conflict without writing when revision is stale', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: workoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: '0426', sets: [{ w: 25, r: 10 }] }],
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires a token with workout:write scope', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: workoutWriteState() }, () => {
+      const r = call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: '0426', sets: [{ w: 25, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'workout:write'
+        }
+      })
+    })
+  })
+
+  test('rejects missing routines and exercises outside the routine', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: workoutWriteState() }, () => {
+      expect(() => call('log_workout', {
+        routine_id: 'missing',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: '0426', sets: [{ w: 25, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/no routine with id "missing"/)
+
+      expect(() => call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: 'missing-ex', sets: [{ w: 25, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/routine "push" has no exercise with id "missing-ex"/)
+    })
+  })
+
+  test('rejects mode-specific invalid sets', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: workoutWriteState() }, () => {
+      expect(() => call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: 'plank', sets: [{ w: 0, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/plank set 1 must include integer sec >= 1/)
+
+      expect(() => call('log_workout', {
+        routine_id: 'push',
+        date: '2026-08-30',
+        duration_min: 60,
+        entries: [{ exercise_id: '0426', sets: [{ w: 25, r: 10 }, { w: 25, r: 10 }] }, { exercise_id: '0426', sets: [{ w: 20, r: 8 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/duplicate workout entry for exercise "0426"/)
+    })
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -1516,7 +1738,8 @@ describe('shared: no-state fallback', () => {
       override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true },
       assign_weekday: { weekday: 1, routine_id: 'rest', expected_revision: 0, dry_run: true },
       edit_routine: { routine_id: 'routine', ops: [{ op: 'set_policy', policy: 'off' }], expected_revision: 0, dry_run: true },
-      add_bodyweight: { date: '2026-08-31', weight: 78.4, expected_revision: 0, dry_run: true }
+      add_bodyweight: { date: '2026-08-31', weight: 78.4, expected_revision: 0, dry_run: true },
+      log_workout: { routine_id: 'routine', duration_min: 60, entries: [{ exercise_id: 'exercise', sets: [{ w: 10, r: 10 }] }], expected_revision: 0, dry_run: true }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

@@ -21,8 +21,9 @@ As of 2026-08-30:
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
 - Done: `edit_routine` supports the first narrow patch ops with `routine:write`: `set_policy` and `set_exercise_target` for existing routines/exercises.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
+- Done: `log_workout` stores a completed workout for an existing routine from structured JSON with `workout:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: broader routine editing ops such as add/remove/reorder exercises and deeper workout/set validation.
+- Not done: freestyle workout logging, broader routine editing ops such as add/remove/reorder exercises and deeper shared workout/set validation.
 
 ## Current State
 
@@ -155,7 +156,7 @@ Recommended initial scopes:
 ```text
 schedule:write   override_day, assign_weekday
 routine:write    edit_routine
-workout:write    future log_workout
+workout:write    log_workout
 bodyweight:write add_bodyweight
 ```
 
@@ -259,6 +260,7 @@ override_day
 assign_weekday
 edit_routine
 add_bodyweight
+log_workout
 ```
 
 `override_day`:
@@ -311,6 +313,30 @@ The tool accepts at most 10 ops per call. The public MCP field is `policy`, whil
 ```
 
 If the date already exists, the entry is replaced rather than duplicated. The stored state keeps `bodyweight` sorted by date.
+
+`log_workout` writes a finished workout for an existing routine only. Natural language parsing stays in the LLM client; MCP receives structured JSON:
+
+```json
+{
+  "routine_id": "push",
+  "date": "2026-08-30",
+  "duration_min": 62,
+  "bodyweight": 78.4,
+  "entries": [
+    {
+      "exercise_id": "0426",
+      "sets": [
+        { "w": 25, "r": 10 },
+        { "w": 25, "r": 8 }
+      ]
+    }
+  ],
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+The tool rejects unknown routines, exercises outside the routine, duplicate exercise entries and invalid mode-specific set shapes. It stores entries in routine order, copies each routine target into the workout entry, forces supplied sets to `done: true`, computes `vol`, `prs` and `exWeights`, and records compact audit details without logging full state snapshots.
 
 ## Dry Run
 
@@ -376,6 +402,7 @@ Input validation examples:
 - exercise ids in `edit_routine` must exist inside that routine;
 - weights, reps, sets, seconds and speeds must stay finite and within sane bounds;
 - operation list length should be capped.
+- `log_workout` entries must reference exercises inside the selected routine and match reps/time/cardio set shape.
 
 Current state validation covers:
 
@@ -508,6 +535,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 9. Done: Implement `add_bodyweight`.
 10. Done: Add shared state validation.
 11. Done: Add audit log tests and conflict tests.
+12. Done: Implement structured `log_workout` for existing routines.
 
 ## Testing Strategy
 
@@ -556,7 +584,8 @@ override_day
 assign_weekday
 edit_routine
 add_bodyweight
-future: log_workout, broader routine editor ops
+log_workout
+future: broader routine editor ops, freestyle workout logging
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.
