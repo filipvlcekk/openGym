@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { validateState } from './state-validation.js';
 
 function safeUid(uid) {
   return String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '');
@@ -98,9 +99,21 @@ export function createStateService({ dataDir, audit = null }) {
 
       const draft = JSON.parse(JSON.stringify(current));
       const mutated = mutation(draft);
-      const next = { ...(mutated && typeof mutated === 'object' ? mutated : draft) };
+      const base = mutated && typeof mutated === 'object' ? mutated : draft;
+      const next = Array.isArray(base) ? base : { ...base };
       delete next.active;
       next._revision = currentRevision + 1;
+      const validation = validateState(next);
+      if (!validation.ok) {
+        return {
+          ok: false,
+          error: {
+            code: 'STATE_VALIDATION_FAILED',
+            message: 'State validation failed.',
+            issues: validation.issues
+          }
+        };
+      }
       atomicWrite(stateFile(uid), JSON.stringify(next));
       audit?.appendAuditEvent({
         uid: safeUid(uid),

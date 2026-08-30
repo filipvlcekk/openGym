@@ -1973,7 +1973,8 @@ Stav k 2026-08-30:
 - hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: první úzký `edit_routine` pro `set_policy` a `set_exercise_target` na existující rutině/cviku s `routine:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
-- zbývá: `log_workout`, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a užší validace mutací.
+- hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
+- zbývá: `log_workout`, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a hlubší validace workout setů.
 
 Současně:
 

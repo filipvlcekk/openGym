@@ -138,8 +138,9 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 - **In progress (Phase 2):** read+write over stdio. Done so far: long-lived token auth,
   `./data/tokens.json`, per-user state locks, `_revision` conflict checks, scrubbed
   `audit.log`, `override_day`, `assign_weekday`, and narrow `edit_routine` patch ops for
-  routine policy plus existing exercise targets, and `add_bodyweight`. Remaining tools:
-  future `log_workout` and broader routine editing ops such as add/remove/reorder.
+  routine policy plus existing exercise targets, `add_bodyweight`, and shared structural
+  state validation before committed writes. Remaining tools: future `log_workout` and
+  broader routine editing ops such as add/remove/reorder.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.
 - **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same

@@ -21,7 +21,8 @@ As of 2026-08-30:
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
 - Done: `edit_routine` supports the first narrow patch ops with `routine:write`: `set_policy` and `set_exercise_target` for existing routines/exercises.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
-- Not done: broader routine editing ops such as add/remove/reorder exercises and narrower full-state mutation validation.
+- Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
+- Not done: broader routine editing ops such as add/remove/reorder exercises and deeper workout/set validation.
 
 ## Current State
 
@@ -365,7 +366,7 @@ The AI workflow should be:
 
 ## Validation
 
-Validation should happen before and after mutation.
+Shared state validation now happens after mutation sanitization and before `atomicWrite()`/audit logging in `api/state-service.js`.
 
 Input validation examples:
 
@@ -376,13 +377,18 @@ Input validation examples:
 - weights, reps, sets, seconds and speeds must stay finite and within sane bounds;
 - operation list length should be capped.
 
-State validation examples:
+Current state validation covers:
 
 - `routines` remains an array;
 - routine ids remain unique;
 - `week` only references existing routine ids;
 - `dayPlan` values are existing routine ids or `rest`;
+- `dayPlan` and bodyweight dates are exact `YYYY-MM-DD`;
+- bodyweight entries use unique dates and positive finite weights;
+- `workouts` is an array with basic date and entries-array shape;
 - no `active` workout is persisted from write tools.
+
+Deeper set-level workout validation is intentionally future work so existing imported history is not rejected prematurely.
 
 ## Audit Log
 
@@ -500,7 +506,8 @@ Do not split first just for neatness; split when it reduces real complexity.
 7. Done: Implement `assign_weekday`.
 8. Done: Implement narrow `edit_routine` patch ops for routine policy and existing exercise targets.
 9. Done: Implement `add_bodyweight`.
-10. Done: Add audit log tests and conflict tests.
+10. Done: Add shared state validation.
+11. Done: Add audit log tests and conflict tests.
 
 ## Testing Strategy
 
