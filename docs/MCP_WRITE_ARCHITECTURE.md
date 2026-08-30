@@ -20,6 +20,7 @@ As of 2026-08-30:
 - Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
 - Done: `edit_routine` supports the first narrow patch ops with `routine:write`: `set_policy` and `set_exercise_target` for existing routines/exercises.
+- Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
 - Not done: broader routine editing ops such as add/remove/reorder exercises and narrower full-state mutation validation.
 
 ## Current State
@@ -154,7 +155,7 @@ Recommended initial scopes:
 schedule:write   override_day, assign_weekday
 routine:write    edit_routine
 workout:write    future log_workout
-bodyweight:write future add_bodyweight
+bodyweight:write add_bodyweight
 ```
 
 Read tools can stay filesystem-only initially, but once write auth exists it is cleaner to require token auth for write tools and leave read-only tools unchanged.
@@ -256,6 +257,7 @@ Initial tools:
 override_day
 assign_weekday
 edit_routine
+add_bodyweight
 ```
 
 `override_day`:
@@ -295,6 +297,19 @@ edit_routine
 ```
 
 The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary.
+
+`add_bodyweight` writes the same shape as the React UI:
+
+```json
+{
+  "date": "2026-08-30",
+  "weight": 78.4,
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+If the date already exists, the entry is replaced rather than duplicated. The stored state keeps `bodyweight` sorted by date.
 
 ## Dry Run
 
@@ -484,7 +499,8 @@ Do not split first just for neatness; split when it reduces real complexity.
 6. Done: Implement `override_day` with dry-run first.
 7. Done: Implement `assign_weekday`.
 8. Done: Implement narrow `edit_routine` patch ops for routine policy and existing exercise targets.
-9. Done: Add audit log tests and conflict tests.
+9. Done: Implement `add_bodyweight`.
+10. Done: Add audit log tests and conflict tests.
 
 ## Testing Strategy
 
@@ -532,7 +548,8 @@ token-service + scopes
 override_day
 assign_weekday
 edit_routine
-future: log_workout, add_bodyweight, broader routine editor ops
+add_bodyweight
+future: log_workout, broader routine editor ops
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

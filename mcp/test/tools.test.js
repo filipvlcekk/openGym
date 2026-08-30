@@ -118,6 +118,16 @@ function routineEditState() {
   }
 }
 
+function bodyweightWriteState() {
+  return {
+    ...writeToolState(),
+    bodyweight: [
+      { d: '2026-08-20', w: 78.8, t: 1787227200000 },
+      { d: '2026-08-30', w: 78.1, t: 1788091200000 }
+    ]
+  }
+}
+
 function withWriteToolEnv({ scopes = ['schedule:write'], state = writeToolState() } = {}, fn) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-override-day-'))
   const prevData = process.env.OPENGYM_DATA
@@ -1344,6 +1354,145 @@ describe('edit_routine', () => {
   })
 })
 
+/* ---------- add_bodyweight ---------- */
+
+describe('add_bodyweight', () => {
+  test('dry_run previews a new weigh-in without writing state or audit', () => {
+    withWriteToolEnv({ scopes: ['bodyweight:write'], state: bodyweightWriteState() }, ({ dataDir }) => {
+      const r = call('add_bodyweight', {
+        date: '2026-08-25',
+        weight: 78.36,
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        unit: 'kg',
+        changes: [{
+          path: 'bodyweight.2026-08-25',
+          before: null,
+          after: 78.4
+        }]
+      })
+      expect(readDiskState(dataDir).bodyweight.map(b => b.d)).toEqual(['2026-08-20', '2026-08-30'])
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit inserts a sorted weigh-in, increments revision and appends audit', () => {
+    withWriteToolEnv({ scopes: ['bodyweight:write'], state: bodyweightWriteState() }, ({ dataDir, token }) => {
+      const r = call('add_bodyweight', {
+        date: '2026-08-25',
+        weight: 78.36,
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        unit: 'kg',
+        changes: [{
+          path: 'bodyweight.2026-08-25',
+          before: null,
+          after: 78.4
+        }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.bodyweight.map(b => b.d)).toEqual(['2026-08-20', '2026-08-25', '2026-08-30'])
+      expect(saved.bodyweight[1]).toMatchObject({ d: '2026-08-25', w: 78.4 })
+      expect(typeof saved.bodyweight[1].t).toBe('number')
+      expect(saved._revision).toBe(8)
+      const events = readAuditEvents(dataDir)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'add_bodyweight',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: { date: '2026-08-25', weight: 78.4 }
+      })
+    })
+  })
+
+  test('commit replaces an existing weigh-in for the same date instead of duplicating it', () => {
+    withWriteToolEnv({ scopes: ['bodyweight:write'], state: bodyweightWriteState() }, ({ dataDir }) => {
+      const r = call('add_bodyweight', {
+        date: '2026-08-30',
+        weight: 77.95,
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        unit: 'kg',
+        changes: [{ path: 'bodyweight.2026-08-30', before: 78.1, after: 78 }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.bodyweight).toHaveLength(2)
+      expect(saved.bodyweight.at(-1)).toMatchObject({ d: '2026-08-30', w: 78 })
+    })
+  })
+
+  test('commit rejects stale expected_revision without changing state', () => {
+    withWriteToolEnv({ scopes: ['bodyweight:write'], state: bodyweightWriteState() }, ({ dataDir }) => {
+      const r = call('add_bodyweight', {
+        date: '2026-08-25',
+        weight: 78.4,
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).bodyweight.map(b => b.d)).toEqual(['2026-08-20', '2026-08-30'])
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires a token with bodyweight:write scope', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: bodyweightWriteState() }, () => {
+      const r = call('add_bodyweight', {
+        date: '2026-08-25',
+        weight: 78.4,
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'bodyweight:write'
+        }
+      })
+    })
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -1366,7 +1515,8 @@ describe('shared: no-state fallback', () => {
       detect_stalls: { window: 4 },
       override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true },
       assign_weekday: { weekday: 1, routine_id: 'rest', expected_revision: 0, dry_run: true },
-      edit_routine: { routine_id: 'routine', ops: [{ op: 'set_policy', policy: 'off' }], expected_revision: 0, dry_run: true }
+      edit_routine: { routine_id: 'routine', ops: [{ op: 'set_policy', policy: 'off' }], expected_revision: 0, dry_run: true },
+      add_bodyweight: { date: '2026-08-31', weight: 78.4, expected_revision: 0, dry_run: true }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})

@@ -669,22 +669,23 @@ Tato funkce by však vyžadovala velmi dobrou validaci.
 
 ## 11.5 `add_bodyweight`
 
-Jednoduchý write tool:
+Jednoduchý write tool. V tomto forku je implementovaný jako `add_bodyweight` se scope `bodyweight:write`, dry-run režimem, `expected_revision` kontrolou a audit commitem:
 
 ```json
 {
   "date": "2026-08-24",
   "weight": 82.4,
-  "unit": "kg"
+  "expected_revision": 184,
+  "dry_run": true
 }
 ```
 
 Musí být definováno:
 
-- zda lze zadat duplicitní datum,
-- zda nový údaj přepíše starý,
-- jak fungují jednotky,
-- povolený rozsah hodnot.
+- duplicitní datum se nenásobí, ale nahrazuje,
+- hodnota se ukládá ve stávající jednotce profilu,
+- váha musí být kladná a ukládá se na jedno desetinné místo,
+- `bodyweight` zůstává seřazený podle data.
 
 ---
 
@@ -1948,6 +1949,7 @@ Implementovat:
 override_day
 assign_weekday
 edit_routine
+add_bodyweight
 ```
 
 Detailní architektonický návrh Phase 2 je v samostatném dokumentu:
@@ -1970,7 +1972,8 @@ Stav k 2026-08-30:
 - hotovo: první MCP write tool `override_day` s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: první úzký `edit_routine` pro `set_policy` a `set_exercise_target` na existující rutině/cviku s `routine:write`, dry-run, revision checkem a audit commitem,
-- zbývá: širší routine editor operace, například přidání, odebrání a přeřazení cviků, a užší validace mutací.
+- hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
+- zbývá: `log_workout`, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a užší validace mutací.
 
 Současně:
 
@@ -2219,7 +2222,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a tři scoped write tooly: `override_day`, `assign_weekday` a první úzký `edit_routine`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a čtyři scoped write tooly: `override_day`, `assign_weekday`, první úzký `edit_routine` a `add_bodyweight`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

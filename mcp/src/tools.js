@@ -150,6 +150,37 @@ function bodyweightSummary(S, range) {
   }
 }
 
+function normalizeBodyweight(weight) {
+  const n = Math.round((Number(weight) || 0) * 10) / 10
+  if (!(n > 0)) fail('EINVAL', 'weight must be > 0')
+  return n
+}
+
+function bodyweightTimestamp(date) {
+  return new Date(date + 'T12:00:00').getTime()
+}
+
+function bodyweightChange(S, date, weight) {
+  const after = normalizeBodyweight(weight)
+  const current = (S.bodyweight || []).find(b => b.d === date)
+  return {
+    path: `bodyweight.${date}`,
+    before: current ? normalizeBodyweight(current.w) : null,
+    after
+  }
+}
+
+function applyBodyweightEntry(current, date, weight) {
+  const entry = { d: date, w: normalizeBodyweight(weight), t: bodyweightTimestamp(date) }
+  return {
+    ...current,
+    bodyweight: [
+      ...(current.bodyweight || []).filter(b => b.d !== date),
+      entry
+    ].sort((a, b) => (a.d < b.d ? -1 : 1))
+  }
+}
+
 function muscleCoverageSummary(workouts) {
   const load = loadOfWorkouts(workouts)
   const { worked, missed } = rankOf(load)
@@ -1158,10 +1189,90 @@ export const editRoutine = {
   }
 }
 
+/** add_bodyweight — write one body-weight weigh-in for a date. */
+export const addBodyweight = {
+  name: 'add_bodyweight',
+  description: 'Add or replace one body-weight weigh-in. Requires OPENGYM_MCP_TOKEN with bodyweight:write. Date defaults to today; use dry_run=true first to preview before committing.',
+  schema: {
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Date for the weigh-in as YYYY-MM-DD. Defaults to today.'),
+    weight: z.number().positive().describe('Body weight in the profile unit. Rounded to one decimal.'),
+    expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+    dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
+  },
+  handler: ({ date = currentISO(), weight, expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'bodyweight:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const change = bodyweightChange(S, date, weight)
+    const changes = change.before === change.after ? [] : [change]
+    const revision = revisionOf(S)
+    const unit = S.unit || 'kg'
+
+    if (dry_run) {
+      return {
+        ok: true,
+        dry_run: true,
+        would_change: changes.length > 0,
+        revision,
+        unit,
+        changes
+      }
+    }
+
+    if (!changes.length) {
+      if (expected_revision !== revision) {
+        return {
+          ok: false,
+          error: {
+            code: 'STATE_CONFLICT',
+            message: 'State changed since the tool read it.',
+            current_revision: revision
+          }
+        }
+      }
+      return {
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: revision,
+        revision_after: revision,
+        unit,
+        changes
+      }
+    }
+
+    const result = states.updateUserState(auth.token.uid, current => {
+      return applyBodyweightEntry(current, date, change.after)
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'add_bodyweight',
+      expectedRevision: expected_revision,
+      details: { date, weight: change.after }
+    })
+    if (!result.ok) return result
+
+    return {
+      ok: true,
+      dry_run: false,
+      changed: true,
+      revision_before: revision,
+      revision_after: result.revision,
+      unit,
+      changes
+    }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, addBodyweight
 ]
 
 function noState() {
