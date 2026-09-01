@@ -112,9 +112,16 @@ function routineEditState() {
       prog: 'linear',
       ex: [
         { id: '0426', sets: 3, reps: 10, weight: 25, mode: 'reps', inc: 2.5 },
-        { id: 'plank', sets: 3, sec: 60, mode: 'time' }
+        { id: 'plank', sets: 3, sec: 60, mode: 'time', sg: 'A' },
+        { id: '1323', sets: 3, reps: 10, weight: 55, mode: 'reps', sg: 'A' }
       ]
-    }]
+    }],
+    workouts: [
+      workout('old-routine-edit', '2026-08-01', 'push', 'Push Day', [
+        entry('plank', { id: 'plank', sets: 3, sec: 60, mode: 'time' }, [{ sec: 60 }])
+      ])
+    ],
+    exWeights: { plank: { w: 0, d: '2026-08-01' } }
   }
 }
 
@@ -1308,6 +1315,148 @@ describe('edit_routine', () => {
     })
   })
 
+  test('dry_run previews adding an exercise without writing state or audit', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{
+          op: 'add_exercise',
+          exercise_id: '0739',
+          position: 2,
+          target: { sets: 4, mode: 'reps', reps: 8, weight: 120 }
+        }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        changes: [{
+          path: 'routines.push.ex',
+          op: 'add_exercise',
+          exercise_id: '0739',
+          before: null,
+          after: { id: '0739', sets: 4, mode: 'reps', reps: 8, weight: 120 },
+          position: 2
+        }]
+      })
+      expect(readDiskState(dataDir).routines[0].ex.map(e => e.id)).toEqual(['0426', 'plank', '1323'])
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit inserts an exercise at the requested position and appends audit', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir, token }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{
+          op: 'add_exercise',
+          exercise_id: '0739',
+          position: 2,
+          target: { sets: 4, mode: 'reps', reps: 8, weight: 120 }
+        }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'routines.push.ex',
+          op: 'add_exercise',
+          exercise_id: '0739',
+          before: null,
+          after: { id: '0739', sets: 4, mode: 'reps', reps: 8, weight: 120 },
+          position: 2
+        }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.routines[0].ex.map(e => e.id)).toEqual(['0426', '0739', 'plank', '1323'])
+      expect(saved.routines[0].ex[1]).toEqual({ id: '0739', sets: 4, mode: 'reps', reps: 8, weight: 120 })
+      expect(saved._revision).toBe(8)
+      expect(readAuditEvents(dataDir)).toMatchObject([{
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'edit_routine',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: {
+          routine_id: 'push',
+          ops: [{
+            op: 'add_exercise',
+            exercise_id: '0739',
+            position: 2,
+            target: { sets: 4, mode: 'reps', reps: 8, weight: 120 }
+          }]
+        }
+      }])
+    })
+  })
+
+  test('remove_exercise keeps workout history and exWeights while cleaning orphan superset ids', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'remove_exercise', exercise_id: 'plank' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        changes: [{
+          path: 'routines.push.ex.plank',
+          op: 'remove_exercise',
+          exercise_id: 'plank',
+          before: { id: 'plank', sets: 3, sec: 60, mode: 'time', sg: 'A' },
+          after: null
+        }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.routines[0].ex.map(e => e.id)).toEqual(['0426', '1323'])
+      expect(saved.routines[0].ex[1].sg).toBeUndefined()
+      expect(saved.workouts[0].entries.map(e => e.id)).toEqual(['plank'])
+      expect(saved.exWeights).toEqual({ plank: { w: 0, d: '2026-08-01' } })
+    })
+  })
+
+  test('reorder_exercise moves to a one-based position and cleans orphan superset ids', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'reorder_exercise', exercise_id: '1323', position: 1 }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        changes: [{
+          path: 'routines.push.ex',
+          op: 'reorder_exercise',
+          exercise_id: '1323',
+          before: 3,
+          after: 1
+        }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.routines[0].ex.map(e => e.id)).toEqual(['1323', '0426', 'plank'])
+      expect(saved.routines[0].ex.map(e => e.sg || null)).toEqual([null, null, null])
+    })
+  })
+
   test('commit rejects stale expected_revision without changing state', () => {
     withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir }) => {
       const r = call('edit_routine', {
@@ -1352,7 +1501,7 @@ describe('edit_routine', () => {
     })
   })
 
-  test('rejects missing routines, missing exercises and unknown ops', () => {
+  test('rejects missing routines, missing exercises, invalid structural ops and unknown ops', () => {
     withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, () => {
       expect(() => call('edit_routine', {
         routine_id: 'missing',
@@ -1364,6 +1513,27 @@ describe('edit_routine', () => {
       expect(() => call('edit_routine', {
         routine_id: 'push',
         ops: [{ op: 'set_exercise_target', exercise_id: 'missing-ex', reps: 8 }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/routine "push" has no exercise with id "missing-ex"/)
+
+      expect(() => call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'add_exercise', exercise_id: 'missing-ex', target: { reps: 8 } }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unknown exercise id "missing-ex"/)
+
+      expect(() => call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'add_exercise', exercise_id: '0426', target: { reps: 8 } }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/routine "push" already has exercise "0426"/)
+
+      expect(() => call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'remove_exercise', exercise_id: 'missing-ex' }],
         expected_revision: 7,
         dry_run: true
       })).toThrow(/routine "push" has no exercise with id "missing-ex"/)

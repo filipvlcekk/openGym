@@ -610,7 +610,7 @@ Slouží pro strukturální úpravu programu.
 
 Operace by měla být co nejvíce explicitní.
 
-Aktuální implementace v tomto forku je záměrně užší: `edit_routine` umí patchovat existující rutinu pomocí `set_policy` a `set_exercise_target`. Neumí zatím přidat cvik, odebrat cvik ani měnit pořadí cviků.
+Aktuální implementace v tomto forku je patch-based: `edit_routine` umí `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` a `reorder_exercise`. Neumí zatím vytvořit nový custom cvik ani přímo upravovat superset skupiny.
 
 Nevhodné:
 
@@ -626,29 +626,34 @@ Lepší:
 ```json
 {
   "routine_id": "push",
-  "operation": "update_exercise",
-  "exercise_id": "bench_press",
-  "changes": {
-    "sets": 4,
-    "rep_min": 6,
-    "rep_max": 8
-  }
+  "ops": [
+    { "op": "set_exercise_target", "exercise_id": "bench_press", "sets": 4, "repsMin": 6, "repsMax": 8 },
+    { "op": "add_exercise", "exercise_id": "0739", "position": 2, "target": { "sets": 4, "mode": "reps", "reps": 8, "weight": 120 } },
+    { "op": "remove_exercise", "exercise_id": "plank" },
+    { "op": "reorder_exercise", "exercise_id": "1323", "position": 1 }
+  ],
+  "expected_revision": 184,
+  "dry_run": true
 }
 ```
 
-Ještě bezpečnější je vytvořit samostatné jemnozrnné tools:
+Tyto operace zůstávají jemnozrnné, jen jsou sdružené pod jeden rutinní patch tool:
 
 ```text
-add_exercise_to_routine
-remove_exercise_from_routine
-update_exercise_target
-reorder_routine_exercises
-set_progression_policy
+set_policy
+set_exercise_target
+add_exercise
+remove_exercise
+reorder_exercise
 ```
 
-Výhodou je menší prostor pro chybný nebo destruktivní zápis.
+Výhodou je menší prostor pro chybný nebo destruktivní zápis oproti nahrazení celé rutiny jedním velkým JSONem.
 
 Současný MCP kontrakt používá název `policy`, ale openGym frontend ukládá rutinní progression do pole `prog`. MCP vrstva proto tuto hranici normalizuje: navenek ukazuje `policy`, do state zapisuje kompatibilní `prog`.
+
+`add_exercise` používá existující cviky z katalogu nebo `customEx`. LLM tedy může z věty uživatele najít vhodné `exercise_id`, ale pokud chce uživatel úplně nový custom cvik, bude to samostatná budoucí operace.
+
+`remove_exercise` a `reorder_exercise` po změně volají stejný `cleanupSg` helper jako frontend, aby v rutině nezůstaly osiřelé superset id.
 
 ---
 
@@ -2005,11 +2010,11 @@ Stav k 2026-08-30:
 - hotovo: scrubovaný JSONL audit log pro úspěšné state writy,
 - hotovo: první MCP write tool `override_day` s dry-run, `schedule:write`, revision checkem a audit commitem,
 - hotovo: MCP write tool `assign_weekday` pro týdenní plán s dry-run, `schedule:write`, revision checkem a audit commitem,
-- hotovo: první úzký `edit_routine` pro `set_policy` a `set_exercise_target` na existující rutině/cviku s `routine:write`, dry-run, revision checkem a audit commitem,
+- hotovo: `edit_routine` pro `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` a `reorder_exercise` s `routine:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `log_workout` pro zapsání hotového workoutu podle existující rutiny se `workout:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
-- zbývá: freestyle workout logging, širší routine editor operace, například přidání, odebrání a přeřazení cviků, a hlubší sdílená validace workout setů.
+- zbývá: vytvoření custom cviku, přímá editace superset skupin, freestyle workout logging a hlubší sdílená validace workout setů.
 
 Současně:
 
@@ -2030,14 +2035,11 @@ AI umí plán nejen navrhnout, ale i uložit.
 
 ## Phase 2.5 – Fine-grained routine editor
 
-Přidat:
+Zbývá doplnit:
 
 ```text
-update_exercise_target
-add_exercise_to_routine
-remove_exercise_from_routine
-set_progression_policy
-reorder_exercises
+create_custom_exercise
+edit_superset_groups
 ```
 
 ---
@@ -2258,7 +2260,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a pět scoped write toolů: `override_day`, `assign_weekday`, první úzký `edit_routine`, `add_bodyweight` a `log_workout`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a pět scoped write toolů: `override_day`, `assign_weekday`, strukturovaný `edit_routine`, `add_bodyweight` a `log_workout`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

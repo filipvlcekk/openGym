@@ -8,7 +8,7 @@ The design goal is simple: every write must be authenticated, scoped, validated,
 
 ## Implementation Status
 
-As of 2026-08-30:
+As of 2026-09-01:
 
 - Done: `api/state-service.js` owns API state reads and full-state replacement.
 - Done: `updateUserState(uid, mutation, options)` supports per-user locks, `_revision` increments and optional `expectedRevision` conflict checks.
@@ -19,11 +19,11 @@ As of 2026-08-30:
 - Done: `api/audit-service.js` writes scrubbed JSONL audit events for committed state writes.
 - Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
-- Done: `edit_routine` supports the first narrow patch ops with `routine:write`: `set_policy` and `set_exercise_target` for existing routines/exercises.
+- Done: `edit_routine` supports structured patch ops with `routine:write`: `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` and `reorder_exercise`.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
 - Done: `log_workout` stores a completed workout for an existing routine from structured JSON with `workout:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: freestyle workout logging, broader routine editing ops such as add/remove/reorder exercises and deeper shared workout/set validation.
+- Not done: custom exercise creation, direct superset editing, freestyle workout logging and deeper shared workout/set validation.
 
 ## Current State
 
@@ -285,21 +285,24 @@ log_workout
 }
 ```
 
-`edit_routine` is patch-based, not whole-routine replacement. The first implemented ops are limited to existing routines and existing exercises:
+`edit_routine` is patch-based, not whole-routine replacement. Supported ops are limited to existing routines and catalog/custom exercise ids:
 
 ```json
 {
   "routine_id": "push",
   "ops": [
     { "op": "set_exercise_target", "exercise_id": "0426", "weight": 27.5, "reps": 10 },
-    { "op": "set_policy", "policy": "linear" }
+    { "op": "set_policy", "policy": "linear" },
+    { "op": "add_exercise", "exercise_id": "0739", "position": 2, "target": { "sets": 4, "mode": "reps", "reps": 8, "weight": 120 } },
+    { "op": "remove_exercise", "exercise_id": "plank" },
+    { "op": "reorder_exercise", "exercise_id": "1323", "position": 1 }
   ],
   "expected_revision": 184,
   "dry_run": true
 }
 ```
 
-The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary.
+The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary. `add_exercise` starts from the same default target config the UI uses, then applies the supplied target patch. `remove_exercise` and `reorder_exercise` run `cleanupSg` so orphan superset ids are not left behind.
 
 `add_bodyweight` writes the same shape as the React UI:
 
@@ -399,7 +402,8 @@ Input validation examples:
 - ISO dates must be exact `YYYY-MM-DD`;
 - `weekday` must be `0..6` or an accepted weekday string normalized to `0..6`;
 - `routine_id` must exist unless the operation explicitly supports `rest`;
-- exercise ids in `edit_routine` must exist inside that routine;
+- exercise ids in `set_exercise_target`, `remove_exercise` and `reorder_exercise` must exist inside that routine;
+- exercise ids in `add_exercise` must exist in the catalog or `customEx`, and must not already exist inside that routine;
 - weights, reps, sets, seconds and speeds must stay finite and within sane bounds;
 - operation list length should be capped.
 - `log_workout` entries must reference exercises inside the selected routine and match reps/time/cardio set shape.
@@ -536,6 +540,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 10. Done: Add shared state validation.
 11. Done: Add audit log tests and conflict tests.
 12. Done: Implement structured `log_workout` for existing routines.
+13. Done: Extend `edit_routine` with add/remove/reorder exercise ops.
 
 ## Testing Strategy
 
@@ -585,7 +590,7 @@ assign_weekday
 edit_routine
 add_bodyweight
 log_workout
-future: broader routine editor ops, freestyle workout logging
+future: custom exercise creation, direct superset editing, freestyle workout logging
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

@@ -10,7 +10,7 @@ import {
   setLabel, exLine, muscleName, policyName, friendlyDuration, ratio, muscleOrder, fmt
 } from './labels.js'
 import {
-  modeOf, workoutVolume, setsDone, effectiveRoutine, effectiveRoutineId, bestWeightFor
+  modeOf, workoutVolume, setsDone, effectiveRoutine, effectiveRoutineId, bestWeightFor, defaultConfig, cleanupSg
 } from '../../frontend/src/lib/history.js'
 import { EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
 import {
@@ -506,6 +506,36 @@ const setExerciseTargetOpSchema = z.object({
   min: z.number().min(1).optional(),
   speed: z.number().min(0).optional()
 }).strict()
+const addExerciseTargetSchema = z.object({
+  sets: z.number().int().min(1).optional(),
+  reps: z.number().int().min(1).optional(),
+  weight: z.number().min(0).optional(),
+  inc: z.number().min(0).optional(),
+  repsMin: z.number().int().min(1).optional(),
+  repsMax: z.number().int().min(1).optional(),
+  sec: z.number().int().min(1).optional(),
+  min: z.number().min(1).optional(),
+  speed: z.number().min(0).optional(),
+  mode: z.enum(['reps', 'time', 'cardio']).optional(),
+  bodyweight: z.boolean().optional(),
+  side: z.boolean().optional(),
+  prog: z.enum(['off', 'linear', 'greyskull', 'double', 'time']).optional()
+}).strict()
+const addExerciseOpSchema = z.object({
+  op: z.literal('add_exercise'),
+  exercise_id: z.string().min(1),
+  position: z.number().int().min(1).optional(),
+  target: addExerciseTargetSchema.optional()
+}).strict()
+const removeExerciseOpSchema = z.object({
+  op: z.literal('remove_exercise'),
+  exercise_id: z.string().min(1)
+}).strict()
+const reorderExerciseOpSchema = z.object({
+  op: z.literal('reorder_exercise'),
+  exercise_id: z.string().min(1),
+  position: z.number().int().min(1)
+}).strict()
 const repsWorkoutSetSchema = z.object({
   w: z.number().min(0),
   r: z.number().int().min(1),
@@ -556,9 +586,70 @@ function validateTargetField(field, value) {
   if (value < rule.min) fail('EINVAL', `${field} must be >= ${rule.min}`)
 }
 
-function validateEditRoutineOps(routine, ops) {
+function exerciseFromLibrary(S, exerciseId) {
+  return EXIDX[exerciseId] || (S.customEx || []).find(ex => ex.id === exerciseId) || null
+}
+
+function requireLibraryExercise(S, exerciseId) {
+  const ex = exerciseFromLibrary(S, exerciseId)
+  if (!ex) fail('ENOENT', `unknown exercise id ${JSON.stringify(exerciseId)}`)
+  return ex
+}
+
+function routineExerciseIndex(routine, exerciseId) {
+  return (routine.ex || []).findIndex(cfg => cfg.id === exerciseId)
+}
+
+function normalizePosition(position, min, max, fallback) {
+  const n = position == null ? fallback : position
+  if (!Number.isInteger(n)) fail('EINVAL', 'position must be an integer')
+  return Math.min(Math.max(n, min), max)
+}
+
+function validateAddExerciseTarget(target) {
+  if (!target) return
+  for (const [field, value] of Object.entries(target)) {
+    if (TARGET_FIELDS.has(field)) {
+      validateTargetField(field, value)
+      continue
+    }
+    if (field === 'mode') {
+      if (!['reps', 'time', 'cardio'].includes(value)) fail('EINVAL', `unknown exercise mode ${JSON.stringify(value)}`)
+      continue
+    }
+    if (field === 'bodyweight' || field === 'side') {
+      if (typeof value !== 'boolean') fail('EINVAL', `${field} must be a boolean`)
+      continue
+    }
+    if (field === 'prog') {
+      if (!ROUTINE_POLICY_SET.has(value)) fail('EINVAL', `unknown policy ${JSON.stringify(value)}`)
+      continue
+    }
+    fail('EINVAL', `unsupported add_exercise target field ${JSON.stringify(field)}`)
+  }
+  if (target.repsMin != null && target.repsMax != null && target.repsMax < target.repsMin) {
+    fail('EINVAL', 'repsMax must be >= repsMin')
+  }
+}
+
+function normalizeAddExerciseTarget(S, exerciseId, target = {}) {
+  const ex = requireLibraryExercise(S, exerciseId)
+  validateAddExerciseTarget(target)
+  if (ex.bp === 'cardio' && target.mode && target.mode !== 'cardio') {
+    fail('EINVAL', `cardio exercise ${JSON.stringify(exerciseId)} must use mode "cardio"`)
+  }
+  const mode = target.mode || (ex.bp === 'cardio' ? 'cardio' : undefined)
+  return {
+    id: exerciseId,
+    ...defaultConfig(exerciseId, mode),
+    ...target
+  }
+}
+
+function validateEditRoutineOps(S, routine, ops) {
   if (!Array.isArray(ops) || !ops.length) fail('EINVAL', 'edit_routine needs at least one op')
   if (ops.length > 10) fail('EINVAL', 'edit_routine accepts at most 10 ops')
+  const next = { ...routine, ex: (routine.ex || []).map(cfg => ({ ...cfg })) }
   for (const op of ops) {
     if (!op || typeof op !== 'object') fail('EINVAL', 'edit op must be an object')
     if (op.op === 'set_policy') {
@@ -566,7 +657,7 @@ function validateEditRoutineOps(routine, ops) {
       continue
     }
     if (op.op === 'set_exercise_target') {
-      requireRoutineExercise(routine, op.exercise_id)
+      requireRoutineExercise(next, op.exercise_id)
       const fields = Object.keys(op).filter(field => TARGET_FIELDS.has(field))
       if (!fields.length) fail('EINVAL', 'set_exercise_target needs at least one target field')
       for (const field of Object.keys(op)) {
@@ -578,29 +669,106 @@ function validateEditRoutineOps(routine, ops) {
       }
       continue
     }
+    if (op.op === 'add_exercise') {
+      if (routineExerciseIndex(next, op.exercise_id) !== -1) fail('EINVAL', `routine ${JSON.stringify(routine.id)} already has exercise ${JSON.stringify(op.exercise_id)}`)
+      const cfg = normalizeAddExerciseTarget(S, op.exercise_id, op.target || {})
+      const position = normalizePosition(op.position, 1, (next.ex || []).length + 1, (next.ex || []).length + 1)
+      next.ex.splice(position - 1, 0, cfg)
+      continue
+    }
+    if (op.op === 'remove_exercise') {
+      const index = routineExerciseIndex(next, op.exercise_id)
+      if (index === -1) requireRoutineExercise(next, op.exercise_id)
+      next.ex.splice(index, 1)
+      cleanupSg(next.ex)
+      continue
+    }
+    if (op.op === 'reorder_exercise') {
+      const index = routineExerciseIndex(next, op.exercise_id)
+      if (index === -1) requireRoutineExercise(next, op.exercise_id)
+      const position = normalizePosition(op.position, 1, next.ex.length, next.ex.length)
+      const [cfg] = next.ex.splice(index, 1)
+      next.ex.splice(position - 1, 0, cfg)
+      cleanupSg(next.ex)
+      continue
+    }
     fail('EINVAL', `unknown edit op ${JSON.stringify(op.op)}`)
   }
 }
 
 function editRoutineChanges(S, routineId, ops) {
   const routine = requireRoutineById(S, routineId)
-  validateEditRoutineOps(routine, ops)
+  validateEditRoutineOps(S, routine, ops)
 
   const changes = []
   const pushChange = (path, before, after) => {
     if (!Object.is(before, after)) changes.push({ path, before, after })
   }
+  const next = { ...routine, ex: (routine.ex || []).map(cfg => ({ ...cfg })) }
 
   for (const op of ops) {
     if (op.op === 'set_policy') {
-      pushChange(`routines.${routine.id}.policy`, routinePolicy(routine), op.policy)
+      pushChange(`routines.${routine.id}.policy`, routinePolicy(next), op.policy)
+      next.prog = op.policy
+      delete next.policy
       continue
     }
 
-    const cfg = requireRoutineExercise(routine, op.exercise_id)
-    for (const field of Object.keys(op)) {
-      if (!TARGET_FIELDS.has(field)) continue
-      pushChange(`routines.${routine.id}.ex.${cfg.id}.${field}`, cfg[field] ?? null, op[field])
+    if (op.op === 'set_exercise_target') {
+      const cfg = requireRoutineExercise(next, op.exercise_id)
+      for (const field of Object.keys(op)) {
+        if (!TARGET_FIELDS.has(field)) continue
+        pushChange(`routines.${routine.id}.ex.${cfg.id}.${field}`, cfg[field] ?? null, op[field])
+        cfg[field] = op[field]
+      }
+      continue
+    }
+
+    if (op.op === 'add_exercise') {
+      const cfg = normalizeAddExerciseTarget(S, op.exercise_id, op.target || {})
+      const position = normalizePosition(op.position, 1, next.ex.length + 1, next.ex.length + 1)
+      changes.push({
+        path: `routines.${routine.id}.ex`,
+        op: 'add_exercise',
+        exercise_id: op.exercise_id,
+        before: null,
+        after: { ...cfg },
+        position
+      })
+      next.ex.splice(position - 1, 0, cfg)
+      continue
+    }
+
+    if (op.op === 'remove_exercise') {
+      const index = routineExerciseIndex(next, op.exercise_id)
+      const [cfg] = next.ex.splice(index, 1)
+      changes.push({
+        path: `routines.${routine.id}.ex.${op.exercise_id}`,
+        op: 'remove_exercise',
+        exercise_id: op.exercise_id,
+        before: { ...cfg },
+        after: null
+      })
+      cleanupSg(next.ex)
+      continue
+    }
+
+    if (op.op === 'reorder_exercise') {
+      const index = routineExerciseIndex(next, op.exercise_id)
+      const before = index + 1
+      const position = normalizePosition(op.position, 1, next.ex.length, next.ex.length)
+      const [cfg] = next.ex.splice(index, 1)
+      next.ex.splice(position - 1, 0, cfg)
+      cleanupSg(next.ex)
+      if (before !== position) {
+        changes.push({
+          path: `routines.${routine.id}.ex`,
+          op: 'reorder_exercise',
+          exercise_id: op.exercise_id,
+          before,
+          after: position
+        })
+      }
     }
   }
   return changes
@@ -608,7 +776,7 @@ function editRoutineChanges(S, routineId, ops) {
 
 function applyEditRoutineOps(current, routineId, ops) {
   const routine = requireRoutineById(current, routineId)
-  validateEditRoutineOps(routine, ops)
+  validateEditRoutineOps(current, routine, ops)
   return {
     ...current,
     routines: (current.routines || []).map(r => {
@@ -620,9 +788,31 @@ function applyEditRoutineOps(current, routineId, ops) {
           delete next.policy
           continue
         }
-        const cfg = requireRoutineExercise(next, op.exercise_id)
-        for (const field of Object.keys(op)) {
-          if (TARGET_FIELDS.has(field)) cfg[field] = op[field]
+        if (op.op === 'set_exercise_target') {
+          const cfg = requireRoutineExercise(next, op.exercise_id)
+          for (const field of Object.keys(op)) {
+            if (TARGET_FIELDS.has(field)) cfg[field] = op[field]
+          }
+          continue
+        }
+        if (op.op === 'add_exercise') {
+          const cfg = normalizeAddExerciseTarget(current, op.exercise_id, op.target || {})
+          const position = normalizePosition(op.position, 1, next.ex.length + 1, next.ex.length + 1)
+          next.ex.splice(position - 1, 0, cfg)
+          continue
+        }
+        if (op.op === 'remove_exercise') {
+          const index = routineExerciseIndex(next, op.exercise_id)
+          next.ex.splice(index, 1)
+          cleanupSg(next.ex)
+          continue
+        }
+        if (op.op === 'reorder_exercise') {
+          const index = routineExerciseIndex(next, op.exercise_id)
+          const position = normalizePosition(op.position, 1, next.ex.length, next.ex.length)
+          const [cfg] = next.ex.splice(index, 1)
+          next.ex.splice(position - 1, 0, cfg)
+          cleanupSg(next.ex)
         }
       }
       return next
@@ -1319,10 +1509,10 @@ export const assignWeekday = {
 /** edit_routine — write narrow patch operations against an existing routine. */
 export const editRoutine = {
   name: 'edit_routine',
-  description: 'Patch an existing routine. Requires OPENGYM_MCP_TOKEN with routine:write. Supports set_policy and set_exercise_target ops only; use dry_run=true first to preview exact changes before committing.',
+  description: 'Patch an existing routine. Requires OPENGYM_MCP_TOKEN with routine:write. Supports set_policy, set_exercise_target, add_exercise, remove_exercise and reorder_exercise ops; use dry_run=true first to preview exact changes before committing.',
   schema: {
     routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine.'),
-    ops: z.array(z.discriminatedUnion('op', [setPolicyOpSchema, setExerciseTargetOpSchema])).min(1).max(10).describe('Patch operations to apply in order.'),
+    ops: z.array(z.discriminatedUnion('op', [setPolicyOpSchema, setExerciseTargetOpSchema, addExerciseOpSchema, removeExerciseOpSchema, reorderExerciseOpSchema])).min(1).max(10).describe('Patch operations to apply in order.'),
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
