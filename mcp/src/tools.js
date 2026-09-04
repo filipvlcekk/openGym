@@ -538,6 +538,14 @@ const reorderExerciseOpSchema = z.object({
   exercise_id: z.string().min(1),
   position: z.number().int().min(1)
 }).strict()
+const linkSupersetOpSchema = z.object({
+  op: z.literal('link_superset'),
+  exercise_id: z.string().min(1)
+}).strict()
+const unlinkSupersetOpSchema = z.object({
+  op: z.literal('unlink_superset'),
+  exercise_id: z.string().min(1)
+}).strict()
 const repsWorkoutSetSchema = z.object({
   w: z.number().min(0),
   r: z.number().int().min(1),
@@ -655,6 +663,63 @@ function normalizeAddExerciseTarget(S, exerciseId, target = {}) {
   }
 }
 
+function requireLinkableSupersetExercise(routine, exerciseId) {
+  const index = routineExerciseIndex(routine, exerciseId)
+  if (index === -1) requireRoutineExercise(routine, exerciseId)
+  if (index === 0) fail('EINVAL', 'cannot link the first exercise to a previous exercise')
+  return index
+}
+
+function makeSupersetId(existing = []) {
+  const used = new Set(existing.map(ex => ex.sg).filter(Boolean))
+  for (let i = 0; i < 20; i += 1) {
+    const id = `sg${uid()}`
+    if (!used.has(id)) return id
+  }
+  fail('EINVAL', 'could not generate unique superset id')
+}
+
+function applyLinkSuperset(routine, exerciseId, forcedGroupId) {
+  const index = requireLinkableSupersetExercise(routine, exerciseId)
+  const prev = routine.ex[index - 1]
+  const cur = routine.ex[index]
+  if (cur.sg && prev.sg && cur.sg === prev.sg) return null
+
+  const before = cur.sg || null
+  const groupId = prev.sg || forcedGroupId || makeSupersetId(routine.ex)
+  prev.sg = groupId
+  cur.sg = groupId
+  cleanupSg(routine.ex)
+
+  return {
+    path: `routines.${routine.id}.ex.${cur.id}.sg`,
+    op: 'link_superset',
+    exercise_id: cur.id,
+    with_previous_id: prev.id,
+    before,
+    after: groupId
+  }
+}
+
+function applyUnlinkSuperset(routine, exerciseId) {
+  const index = routineExerciseIndex(routine, exerciseId)
+  if (index === -1) requireRoutineExercise(routine, exerciseId)
+  const cur = routine.ex[index]
+  if (!cur.sg) return null
+
+  const before = cur.sg
+  delete cur.sg
+  cleanupSg(routine.ex)
+
+  return {
+    path: `routines.${routine.id}.ex.${cur.id}.sg`,
+    op: 'unlink_superset',
+    exercise_id: cur.id,
+    before,
+    after: null
+  }
+}
+
 function validateEditRoutineOps(S, routine, ops) {
   if (!Array.isArray(ops) || !ops.length) fail('EINVAL', 'edit_routine needs at least one op')
   if (ops.length > 10) fail('EINVAL', 'edit_routine accepts at most 10 ops')
@@ -701,21 +766,30 @@ function validateEditRoutineOps(S, routine, ops) {
       cleanupSg(next.ex)
       continue
     }
+    if (op.op === 'link_superset') {
+      applyLinkSuperset(next, op.exercise_id, 'sg_preview')
+      continue
+    }
+    if (op.op === 'unlink_superset') {
+      applyUnlinkSuperset(next, op.exercise_id)
+      continue
+    }
     fail('EINVAL', `unknown edit op ${JSON.stringify(op.op)}`)
   }
 }
 
-function editRoutineChanges(S, routineId, ops) {
+function editRoutineChanges(S, routineId, ops, options = {}) {
   const routine = requireRoutineById(S, routineId)
   validateEditRoutineOps(S, routine, ops)
 
+  const { previewSupersetId = 'sg_preview', supersetGroupIdByOp = null } = options
   const changes = []
   const pushChange = (path, before, after) => {
     if (!Object.is(before, after)) changes.push({ path, before, after })
   }
   const next = { ...routine, ex: (routine.ex || []).map(cfg => ({ ...cfg })) }
 
-  for (const op of ops) {
+  for (const [opIndex, op] of ops.entries()) {
     if (op.op === 'set_policy') {
       pushChange(`routines.${routine.id}.policy`, routinePolicy(next), op.policy)
       next.prog = op.policy
@@ -779,19 +853,36 @@ function editRoutineChanges(S, routineId, ops) {
         })
       }
     }
+
+    if (op.op === 'link_superset') {
+      if (supersetGroupIdByOp && !supersetGroupIdByOp.has(opIndex)) {
+        supersetGroupIdByOp.set(opIndex, makeSupersetId(next.ex))
+      }
+      const groupId = supersetGroupIdByOp ? supersetGroupIdByOp.get(opIndex) : previewSupersetId
+      const change = applyLinkSuperset(next, op.exercise_id, groupId)
+      if (change) changes.push(change)
+      continue
+    }
+
+    if (op.op === 'unlink_superset') {
+      const change = applyUnlinkSuperset(next, op.exercise_id)
+      if (change) changes.push(change)
+      continue
+    }
   }
   return changes
 }
 
-function applyEditRoutineOps(current, routineId, ops) {
+function applyEditRoutineOps(current, routineId, ops, options = {}) {
   const routine = requireRoutineById(current, routineId)
   validateEditRoutineOps(current, routine, ops)
+  const { supersetGroupIdByOp = null } = options
   return {
     ...current,
     routines: (current.routines || []).map(r => {
       if (r.id !== routineId) return r
       const next = { ...r, ex: (r.ex || []).map(cfg => ({ ...cfg })) }
-      for (const op of ops) {
+      for (const [opIndex, op] of ops.entries()) {
         if (op.op === 'set_policy') {
           next.prog = op.policy
           delete next.policy
@@ -822,6 +913,14 @@ function applyEditRoutineOps(current, routineId, ops) {
           const [cfg] = next.ex.splice(index, 1)
           next.ex.splice(position - 1, 0, cfg)
           cleanupSg(next.ex)
+          continue
+        }
+        if (op.op === 'link_superset') {
+          applyLinkSuperset(next, op.exercise_id, supersetGroupIdByOp?.get(opIndex))
+          continue
+        }
+        if (op.op === 'unlink_superset') {
+          applyUnlinkSuperset(next, op.exercise_id)
         }
       }
       return next
@@ -1565,10 +1664,10 @@ export const assignWeekday = {
 /** edit_routine — write narrow patch operations against an existing routine. */
 export const editRoutine = {
   name: 'edit_routine',
-  description: 'Patch an existing routine. Requires OPENGYM_MCP_TOKEN with routine:write. Supports set_policy, set_exercise_target, add_exercise, remove_exercise and reorder_exercise ops; use dry_run=true first to preview exact changes before committing.',
+  description: 'Patch an existing routine. Requires OPENGYM_MCP_TOKEN with routine:write. Supports set_policy, set_exercise_target, add_exercise, remove_exercise, reorder_exercise, link_superset and unlink_superset ops; use dry_run=true first to preview exact changes before committing.',
   schema: {
     routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine.'),
-    ops: z.array(z.discriminatedUnion('op', [setPolicyOpSchema, setExerciseTargetOpSchema, addExerciseOpSchema, removeExerciseOpSchema, reorderExerciseOpSchema])).min(1).max(10).describe('Patch operations to apply in order.'),
+    ops: z.array(z.discriminatedUnion('op', [setPolicyOpSchema, setExerciseTargetOpSchema, addExerciseOpSchema, removeExerciseOpSchema, reorderExerciseOpSchema, linkSupersetOpSchema, unlinkSupersetOpSchema])).min(1).max(10).describe('Patch operations to apply in order.'),
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
@@ -1581,10 +1680,10 @@ export const editRoutine = {
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
 
-    const changes = editRoutineChanges(S, routine_id, ops)
     const revision = revisionOf(S)
 
     if (dry_run) {
+      const changes = editRoutineChanges(S, routine_id, ops)
       return {
         ok: true,
         dry_run: true,
@@ -1593,6 +1692,9 @@ export const editRoutine = {
         changes
       }
     }
+
+    const supersetGroupIdByOp = new Map()
+    const changes = editRoutineChanges(S, routine_id, ops, { supersetGroupIdByOp })
 
     if (!changes.length) {
       if (expected_revision !== revision) {
@@ -1616,7 +1718,7 @@ export const editRoutine = {
     }
 
     const result = states.updateUserState(auth.token.uid, current => {
-      return applyEditRoutineOps(current, routine_id, ops)
+      return applyEditRoutineOps(current, routine_id, ops, { supersetGroupIdByOp })
     }, {
       actor: `mcp-token:${auth.token.id}`,
       tokenId: auth.token.id,

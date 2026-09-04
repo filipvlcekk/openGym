@@ -86,7 +86,7 @@ Twelve read-only tools and six scoped write tools in this fork:
 | `progression_next` | What does openGym's configured progression policy prescribe next for this routine exercise? |
 | `override_day` | Write a one-off date override to a routine or `rest`. Requires `schedule:write`, `dry_run`, and `expected_revision`. |
 | `assign_weekday` | Write the recurring weekly schedule for one weekday. Use `rest` to clear that weekday. Requires `schedule:write`, `dry_run`, and `expected_revision`. |
-| `edit_routine` | Patch an existing routine with `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` or `reorder_exercise`. Requires `routine:write`, `dry_run`, and `expected_revision`. |
+| `edit_routine` | Patch an existing routine with `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise`, `reorder_exercise`, `link_superset` or `unlink_superset`. Requires `routine:write`, `dry_run`, and `expected_revision`. |
 | `create_custom_exercise` | Create one custom exercise in the profile catalogue. Requires `exercise:write`, `dry_run`, and `expected_revision`; add it to a routine with `edit_routine.add_exercise`. |
 | `add_bodyweight` | Add or replace one body-weight weigh-in for a date. Requires `bodyweight:write`, `dry_run`, and `expected_revision`. |
 | `log_workout` | Log a completed workout for an existing routine from structured JSON. Requires `workout:write`, `dry_run`, and `expected_revision`. |
@@ -123,13 +123,13 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-87 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+93 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
 progression recommendations, MCP write auth, schedule write dry-run/commit behavior, the
-first routine patch write behavior, custom exercise creation, bodyweight write behavior, and
-structured workout logging.
+routine patch write behavior, routine superset linking/unlinking, custom exercise creation,
+bodyweight write behavior, and structured workout logging.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -142,10 +142,10 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 - **In progress (Phase 2):** read+write over stdio. Done so far: long-lived token auth,
   `./data/tokens.json`, per-user state locks, `_revision` conflict checks, scrubbed
   `audit.log`, `override_day`, `assign_weekday`, and structured `edit_routine` patch ops for
-  routine policy, existing exercise targets, add/remove/reorder exercise changes,
+  routine policy, existing exercise targets, add/remove/reorder exercise changes and direct
+  superset linking/unlinking,
   `add_bodyweight`, structured `log_workout`, `create_custom_exercise`, and shared structural
-  state validation before committed writes. Remaining tools: direct superset editing and
-  freestyle workout logging.
+  state validation before committed writes. Remaining tools: freestyle workout logging.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.
 - **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same

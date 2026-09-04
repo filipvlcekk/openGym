@@ -19,12 +19,12 @@ As of 2026-09-04:
 - Done: `api/audit-service.js` writes scrubbed JSONL audit events for committed state writes.
 - Done: `override_day` is the first MCP write tool with dry-run, `schedule:write`, revision checks and audit-backed commits.
 - Done: `assign_weekday` updates recurring weekly schedule assignments with `schedule:write`, dry-run, revision checks and audit-backed commits.
-- Done: `edit_routine` supports structured patch ops with `routine:write`: `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` and `reorder_exercise`.
+- Done: `edit_routine` supports structured patch ops with `routine:write`: `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise`, `reorder_exercise`, `link_superset` and `unlink_superset`.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
 - Done: `log_workout` stores a completed workout for an existing routine from structured JSON with `workout:write`, dry-run, revision checks and audit-backed commits.
 - Done: `create_custom_exercise` creates one custom exercise with `exercise:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: direct superset editing, freestyle workout logging and deeper shared workout/set validation.
+- Not done: freestyle workout logging and deeper shared workout/set validation.
 
 ## Current State
 
@@ -296,14 +296,16 @@ log_workout
     { "op": "set_policy", "policy": "linear" },
     { "op": "add_exercise", "exercise_id": "0739", "position": 2, "target": { "sets": 4, "mode": "reps", "reps": 8, "weight": 120 } },
     { "op": "remove_exercise", "exercise_id": "plank" },
-    { "op": "reorder_exercise", "exercise_id": "1323", "position": 1 }
+    { "op": "reorder_exercise", "exercise_id": "1323", "position": 1 },
+    { "op": "link_superset", "exercise_id": "0739" },
+    { "op": "unlink_superset", "exercise_id": "1323" }
   ],
   "expected_revision": 184,
   "dry_run": true
 }
 ```
 
-The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary. `add_exercise` starts from the same default target config the UI uses, then applies the supplied target patch. `remove_exercise` and `reorder_exercise` run `cleanupSg` so orphan superset ids are not left behind.
+The tool accepts at most 10 ops per call. The public MCP field is `policy`, while current openGym state stores routine progression in `prog`; MCP read/write code normalizes that boundary. `add_exercise` starts from the same default target config the UI uses, then applies the supplied target patch. `remove_exercise`, `reorder_exercise` and `unlink_superset` run `cleanupSg` so orphan superset ids are not left behind. `link_superset` links an exercise to the previous exercise only; MCP generates the `sg` id server-side instead of accepting arbitrary group ids from the client.
 
 `add_bodyweight` writes the same shape as the React UI:
 
@@ -542,6 +544,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 11. Done: Add audit log tests and conflict tests.
 12. Done: Implement structured `log_workout` for existing routines.
 13. Done: Extend `edit_routine` with add/remove/reorder exercise ops.
+14. Done: Extend `edit_routine` with direct superset link/unlink ops.
 
 ## Testing Strategy
 
@@ -592,7 +595,7 @@ edit_routine
 add_bodyweight
 log_workout
 create_custom_exercise
-future: direct superset editing, freestyle workout logging
+future: freestyle workout logging
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

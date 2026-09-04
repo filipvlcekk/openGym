@@ -126,6 +126,24 @@ function routineEditState() {
   }
 }
 
+function supersetEditState() {
+  return {
+    ...writeToolState(),
+    routines: [{
+      id: 'push',
+      name: 'Push Day',
+      emoji: 'P',
+      prog: 'linear',
+      ex: [
+        { id: '0426', sets: 3, reps: 10, weight: 25, mode: 'reps' },
+        { id: 'plank', sets: 3, sec: 60, mode: 'time' },
+        { id: '1323', sets: 3, reps: 10, weight: 55, mode: 'reps', sg: 'A' },
+        { id: '0739', sets: 4, reps: 8, weight: 120, mode: 'reps', sg: 'A' }
+      ]
+    }]
+  }
+}
+
 function customExerciseWriteState() {
   return {
     ...writeToolState(),
@@ -1467,6 +1485,182 @@ describe('edit_routine', () => {
     })
   })
 
+  test('dry_run previews linking an exercise to the previous exercise without writing state or audit', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: supersetEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: 'plank' }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        changes: [{
+          path: 'routines.push.ex.plank.sg',
+          op: 'link_superset',
+          exercise_id: 'plank',
+          with_previous_id: '0426',
+          before: null,
+          after: 'sg_preview'
+        }]
+      })
+      expect(readDiskState(dataDir).routines[0].ex.map(e => e.sg || null)).toEqual([null, null, 'A', 'A'])
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit links an exercise to the previous exercise with a generated group id', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: supersetEditState() }, ({ dataDir, token }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: 'plank' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'routines.push.ex.plank.sg',
+          op: 'link_superset',
+          exercise_id: 'plank',
+          with_previous_id: '0426',
+          before: null
+        }]
+      })
+      expect(r.changes[0].after).toMatch(/^sg[a-z0-9]+$/)
+      const saved = readDiskState(dataDir)
+      expect(saved.routines[0].ex[0].sg).toBe(r.changes[0].after)
+      expect(saved.routines[0].ex[1].sg).toBe(r.changes[0].after)
+      expect(saved.routines[0].ex[2].sg).toBe('A')
+      expect(saved.routines[0].ex[3].sg).toBe('A')
+      expect(saved._revision).toBe(8)
+      expect(readAuditEvents(dataDir)).toMatchObject([{
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'edit_routine',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: {
+          routine_id: 'push',
+          ops: [{ op: 'link_superset', exercise_id: 'plank' }]
+        }
+      }])
+    })
+  })
+
+  test('link_superset reuses the previous exercise group when extending a superset', () => {
+    const state = supersetEditState()
+    delete state.routines[0].ex[3].sg
+    withWriteToolEnv({ scopes: ['routine:write'], state }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: '0739' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'routines.push.ex.0739.sg',
+          op: 'link_superset',
+          exercise_id: '0739',
+          with_previous_id: '1323',
+          before: null,
+          after: 'A'
+        }]
+      })
+      expect(readDiskState(dataDir).routines[0].ex.map(e => e.sg || null)).toEqual([null, null, 'A', 'A'])
+    })
+  })
+
+  test('link_superset is a no-op when the exercise is already linked to the previous exercise', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: supersetEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: '0739' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: 7,
+        revision_after: 7,
+        changes: []
+      })
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('unlink_superset removes the target group and cleans orphan superset ids', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: supersetEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'unlink_superset', exercise_id: '1323' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        changes: [{
+          path: 'routines.push.ex.1323.sg',
+          op: 'unlink_superset',
+          exercise_id: '1323',
+          before: 'A',
+          after: null
+        }]
+      })
+      const saved = readDiskState(dataDir)
+      expect(saved.routines[0].ex.map(e => e.sg || null)).toEqual([null, null, null, null])
+      expect(saved._revision).toBe(8)
+    })
+  })
+
+  test('unlink_superset is a no-op when the exercise has no group', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: supersetEditState() }, ({ dataDir }) => {
+      const r = call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'unlink_superset', exercise_id: 'plank' }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: false,
+        changed: false,
+        revision_before: 7,
+        revision_after: 7,
+        changes: []
+      })
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
   test('commit rejects stale expected_revision without changing state', () => {
     withWriteToolEnv({ scopes: ['routine:write'], state: routineEditState() }, ({ dataDir }) => {
       const r = call('edit_routine', {
@@ -1544,6 +1738,20 @@ describe('edit_routine', () => {
       expect(() => call('edit_routine', {
         routine_id: 'push',
         ops: [{ op: 'remove_exercise', exercise_id: 'missing-ex' }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/routine "push" has no exercise with id "missing-ex"/)
+
+      expect(() => call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: '0426' }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/cannot link the first exercise/)
+
+      expect(() => call('edit_routine', {
+        routine_id: 'push',
+        ops: [{ op: 'link_superset', exercise_id: 'missing-ex' }],
         expected_revision: 7,
         dry_run: true
       })).toThrow(/routine "push" has no exercise with id "missing-ex"/)

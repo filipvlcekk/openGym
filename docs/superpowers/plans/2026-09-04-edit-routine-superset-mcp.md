@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `mcp/test/tools.test.js`
 
-- [ ] **Step 1: Add a superset edit fixture**
+- [x] **Step 1: Add a superset edit fixture**
 
 Add after `routineEditState()`:
 
@@ -50,7 +50,7 @@ function supersetEditState() {
 }
 ```
 
-- [ ] **Step 2: Add dry-run link test**
+- [x] **Step 2: Add dry-run link test**
 
 Add inside `describe('edit_routine', ...)`:
 
@@ -84,7 +84,7 @@ test('dry_run previews linking an exercise to the previous exercise without writ
 })
 ```
 
-- [ ] **Step 3: Add commit link test for a new group**
+- [x] **Step 3: Add commit link test for a new group**
 
 ```js
 test('commit links an exercise to the previous exercise with a generated group id', () => {
@@ -119,7 +119,7 @@ test('commit links an exercise to the previous exercise with a generated group i
 })
 ```
 
-- [ ] **Step 4: Add commit link test that reuses previous group**
+- [x] **Step 4: Add commit link test that reuses previous group**
 
 ```js
 test('link_superset reuses the previous exercise group when extending a superset', () => {
@@ -154,7 +154,7 @@ delete state.routines[0].ex[3].sg
 
 Commit `link_superset` for `0739` and assert `0739.sg === 'A'`, revision increments, and the change after is `'A'`.
 
-- [ ] **Step 5: Add unlink tests**
+- [x] **Step 5: Add unlink tests**
 
 Add tests asserting:
 
@@ -176,7 +176,7 @@ results in:
 
 Also assert unlinking `plank` when it has no `sg` returns `changed: false`, unchanged revision and no audit.
 
-- [ ] **Step 6: Add validation tests**
+- [x] **Step 6: Add validation tests**
 
 Assert:
 
@@ -185,7 +185,7 @@ Assert:
 - stale revision still returns `STATE_CONFLICT`;
 - missing `routine:write` still returns `TOKEN_FORBIDDEN`.
 
-- [ ] **Step 7: Run tests to verify RED**
+- [x] **Step 7: Run tests to verify RED**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
@@ -198,7 +198,7 @@ Expected: FAIL because `link_superset` and `unlink_superset` are not supported y
 **Files:**
 - Modify: `mcp/src/tools.js`
 
-- [ ] **Step 1: Import `uid`**
+- [x] **Step 1: Import `uid`**
 
 Change the existing format import or add a new one:
 
@@ -206,7 +206,7 @@ Change the existing format import or add a new one:
 import { uid } from '../../frontend/src/lib/format.js'
 ```
 
-- [ ] **Step 2: Add op schemas**
+- [x] **Step 2: Add op schemas**
 
 Add:
 
@@ -224,7 +224,7 @@ const unlinkSupersetOpSchema = z.object({
 
 Add both schemas to the `edit_routine` discriminated union.
 
-- [ ] **Step 3: Add superset helpers**
+- [x] **Step 3: Add superset helpers**
 
 Add near routine edit helpers:
 
@@ -283,7 +283,7 @@ function applyUnlinkSuperset(routine, exerciseId) {
 }
 ```
 
-- [ ] **Step 4: Expand `validateEditRoutineOps`**
+- [x] **Step 4: Expand `validateEditRoutineOps`**
 
 In the sequential validation copy:
 
@@ -292,25 +292,25 @@ In the sequential validation copy:
 
 This validates multi-op sequences as they will apply.
 
-- [ ] **Step 5: Expand `editRoutineChanges`**
+- [x] **Step 5: Expand `editRoutineChanges`**
 
 In the change pass:
 
 - for `link_superset`, call `applyLinkSuperset(next, op.exercise_id, 'sg_preview')` and push the returned change if non-null;
 - for `unlink_superset`, call `applyUnlinkSuperset(next, op.exercise_id)` and push the returned change if non-null.
 
-- [ ] **Step 6: Expand `applyEditRoutineOps`**
+- [x] **Step 6: Expand `applyEditRoutineOps`**
 
 In the commit pass:
 
 - for `link_superset`, call `applyLinkSuperset(next, op.exercise_id)`;
 - for `unlink_superset`, call `applyUnlinkSuperset(next, op.exercise_id)`.
 
-- [ ] **Step 7: Update tool description**
+- [x] **Step 7: Update tool description**
 
 Mention `link_superset` and `unlink_superset` in the `edit_routine` description.
 
-- [ ] **Step 8: Run targeted MCP tests**
+- [x] **Step 8: Run targeted MCP tests**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
@@ -326,7 +326,7 @@ Expected: PASS.
 - Modify: `docs/openGym_AI_Coach_MCP_dokumentace.md`
 - Modify: `docs/superpowers/plans/2026-09-04-edit-routine-superset-mcp.md`
 
-- [ ] **Step 1: Update MCP README**
+- [x] **Step 1: Update MCP README**
 
 Document that `edit_routine` now supports:
 
@@ -340,43 +340,43 @@ Document that `edit_routine` now supports:
 
 Update Phase 2.5 status so direct superset editing is done.
 
-- [ ] **Step 2: Update architecture docs**
+- [x] **Step 2: Update architecture docs**
 
 Update implementation status and recommendation list in `docs/MCP_WRITE_ARCHITECTURE.md`.
 
-- [ ] **Step 3: Update Czech MCP docs**
+- [x] **Step 3: Update Czech MCP docs**
 
 Add `link_superset` and `unlink_superset` to the `edit_routine` section and update Phase 2.5 status.
 
-- [ ] **Step 4: Mark checklist progress**
+- [x] **Step 4: Mark checklist progress**
 
 Change completed plan items from `- [ ]` to `- [x]`.
 
-- [ ] **Step 5: Run MCP suite**
+- [x] **Step 5: Run MCP suite**
 
 Run: `cd mcp && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Run MCP loadability check**
+- [x] **Step 6: Run MCP loadability check**
 
 Run: `cd mcp && npm run check:node-loadable`
 
 Expected: PASS.
 
-- [ ] **Step 7: Run API suite**
+- [x] **Step 7: Run API suite**
 
 Run: `cd api && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 8: Check whitespace**
+- [x] **Step 8: Check whitespace**
 
 Run: `git diff --check`
 
 Expected: no output.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add mcp/src/tools.js mcp/test/tools.test.js mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md docs/superpowers/plans/2026-09-04-edit-routine-superset-mcp.md
