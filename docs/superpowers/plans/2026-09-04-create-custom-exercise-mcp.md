@@ -14,6 +14,9 @@
 
 - Modify `mcp/src/tools.js`: add schema, helper functions, exported tool and registry entry.
 - Modify `mcp/test/tools.test.js`: add contract tests and registry/no-state sample.
+- Modify `api/token-service.js`: allow the new `exercise:write` token scope.
+- Modify `api/test/token-service.test.js`: pin `exercise:write` as a known scope.
+- Modify `api/test/mcp-token-routes.test.js`: pin HTTP token creation with `exercise:write`.
 - Modify `mcp/README.md`: document the new write tool, scope and Phase 2.5 status.
 - Modify `docs/MCP_WRITE_ARCHITECTURE.md`: update implementation status and recommendation list.
 - Modify `docs/openGym_AI_Coach_MCP_dokumentace.md`: update Czech tool/status docs.
@@ -26,7 +29,7 @@
 **Files:**
 - Modify: `mcp/test/tools.test.js`
 
-- [ ] **Step 1: Import built-in body parts**
+- [x] **Step 1: Import built-in body parts**
 
 Change the existing import:
 
@@ -40,7 +43,7 @@ to:
 import { BODYPARTS, EXDB } from '../../frontend/src/lib/exercises.js'
 ```
 
-- [ ] **Step 2: Add a custom exercise fixture**
+- [x] **Step 2: Add a custom exercise fixture**
 
 Add after `routineEditState()`:
 
@@ -55,7 +58,7 @@ function customExerciseWriteState() {
 }
 ```
 
-- [ ] **Step 3: Add dry-run preview test**
+- [x] **Step 3: Add dry-run preview test**
 
 Add a new `describe('create_custom_exercise', ...)` before `add_bodyweight`:
 
@@ -103,7 +106,7 @@ test('dry_run previews a custom exercise without writing state or audit', () => 
 })
 ```
 
-- [ ] **Step 4: Add commit test**
+- [x] **Step 4: Add commit test**
 
 ```js
 test('commit creates a custom exercise, increments revision and appends audit', () => {
@@ -162,7 +165,7 @@ test('commit creates a custom exercise, increments revision and appends audit', 
 })
 ```
 
-- [ ] **Step 5: Add validation and auth tests**
+- [x] **Step 5: Add validation and auth tests**
 
 Add tests that assert:
 
@@ -232,7 +235,7 @@ expect(call('create_custom_exercise', {
 })
 ```
 
-- [ ] **Step 6: Update registry/no-state smoke sample**
+- [x] **Step 6: Update registry/no-state smoke sample**
 
 In the samples object near the bottom of `mcp/test/tools.test.js`, add:
 
@@ -242,7 +245,7 @@ create_custom_exercise: { name: 'Ring support hold', body_part: 'waist', expecte
 
 If `waist` is not available in `BODYPARTS`, use a known catalogue body part from `BODYPARTS[0]` in the test setup.
 
-- [ ] **Step 7: Run tests to verify RED**
+- [x] **Step 7: Run tests to verify RED**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
@@ -253,9 +256,10 @@ Expected: FAIL because `create_custom_exercise` is not registered yet.
 ### Task 2: Implement `create_custom_exercise`
 
 **Files:**
+- Modify: `api/token-service.js`
 - Modify: `mcp/src/tools.js`
 
-- [ ] **Step 1: Import body parts**
+- [x] **Step 1: Import body parts**
 
 Change:
 
@@ -269,7 +273,7 @@ to:
 import { BODYPARTS, EXDB, EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
 ```
 
-- [ ] **Step 2: Add schema**
+- [x] **Step 2: Add schema**
 
 Add near the other write schemas:
 
@@ -277,13 +281,13 @@ Add near the other write schemas:
 const createCustomExerciseSchema = {
   name: z.string().min(1).describe('Name for the new custom exercise. Trimmed before writing.'),
   body_part: z.string().min(1).describe('Existing openGym body part id, for example chest, back, upper legs or cardio.'),
-  description: z.string().max(1000).optional().describe('Optional setup/cue text. Trimmed and capped at 1000 characters.'),
+  description: z.string().optional().describe('Optional setup/cue text. Trimmed and capped at 1000 characters.'),
   expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
   dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
 }
 ```
 
-- [ ] **Step 3: Add helper functions**
+- [x] **Step 3: Add helper functions**
 
 Add below the routine edit helpers:
 
@@ -338,7 +342,7 @@ function customExerciseChange(S, input, id = 'c_preview') {
 }
 ```
 
-- [ ] **Step 4: Add exported tool**
+- [x] **Step 4: Add exported tool**
 
 Add before `addBodyweight`:
 
@@ -401,11 +405,11 @@ export const createCustomExercise = {
 }
 ```
 
-- [ ] **Step 5: Register the tool**
+- [x] **Step 5: Register the tool**
 
 Add `createCustomExercise` to `TOOLS` after `editRoutine` and before `addBodyweight`.
 
-- [ ] **Step 6: Run targeted MCP tests**
+- [x] **Step 6: Run targeted MCP tests**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
@@ -421,7 +425,7 @@ Expected: PASS.
 - Modify: `docs/openGym_AI_Coach_MCP_dokumentace.md`
 - Modify: `docs/superpowers/plans/2026-09-04-create-custom-exercise-mcp.md`
 
-- [ ] **Step 1: Update MCP README**
+- [x] **Step 1: Update MCP README**
 
 Document:
 
@@ -430,43 +434,43 @@ Document:
 - Phase 2.5 has `create_custom_exercise` done;
 - remaining Phase 2.5 item is direct superset editing.
 
-- [ ] **Step 2: Update architecture docs**
+- [x] **Step 2: Update architecture docs**
 
 Update implementation status and recommendation list in `docs/MCP_WRITE_ARCHITECTURE.md`.
 
-- [ ] **Step 3: Update Czech MCP docs**
+- [x] **Step 3: Update Czech MCP docs**
 
 Add `create_custom_exercise` to the write tool section and update the current status around Phase 2.5.
 
-- [ ] **Step 4: Mark checklist progress**
+- [x] **Step 4: Mark checklist progress**
 
 Change completed plan items from `- [ ]` to `- [x]`.
 
-- [ ] **Step 5: Run MCP suite**
+- [x] **Step 5: Run MCP suite**
 
 Run: `cd mcp && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Run MCP loadability check**
+- [x] **Step 6: Run MCP loadability check**
 
 Run: `cd mcp && npm run check:node-loadable`
 
 Expected: PASS.
 
-- [ ] **Step 7: Run API suite**
+- [x] **Step 7: Run API suite**
 
 Run: `cd api && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 8: Check whitespace**
+- [x] **Step 8: Check whitespace**
 
 Run: `git diff --check`
 
 Expected: no output.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add mcp/src/tools.js mcp/test/tools.test.js mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md docs/superpowers/plans/2026-09-04-create-custom-exercise-mcp.md

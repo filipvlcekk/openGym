@@ -55,6 +55,18 @@ test('createToken requires a uid and known scopes', () => {
   });
 });
 
+test('createToken accepts exercise write scope', () => {
+  withTempTokenService(tokens => {
+    const created = tokens.createToken({
+      uid: 'u1',
+      name: 'Claude Desktop',
+      scopes: ['exercise:write']
+    });
+
+    assert.deepEqual(created.record.scopes, ['exercise:write']);
+  });
+});
+
 test('verifyToken returns token identity and updates last_used_at', () => {
   withTempTokenService((tokens, dataDir) => {
     const created = tokens.createToken({

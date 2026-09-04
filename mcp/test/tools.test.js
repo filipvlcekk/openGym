@@ -9,7 +9,7 @@ import path from 'node:path'
 import { describe, beforeAll, afterAll, beforeEach, test, expect, vi } from 'vitest'
 import { createTokenService } from '../../api/token-service.js'
 import { buildDemoState } from '../../frontend/src/lib/demoSeed.js'
-import { EXDB } from '../../frontend/src/lib/exercises.js'
+import { BODYPARTS, EXDB } from '../../frontend/src/lib/exercises.js'
 import { _seedStateForTests } from '../src/state.js'
 import { TOOLS } from '../src/tools.js'
 
@@ -24,6 +24,7 @@ const NEWEST_WORKOUT = { date: '2026-07-24', name: 'Leg Day', volume: 18412.5, b
 const LATEST_BW = { date: '2026-07-27', weight: 78.3, delta: 1.3 }
 const LEG_PRESS_ID = '0739'                                 // sled 45° leg press in the demo data
 const LEG_PRESS_BEST = { w: 152.5, r: 12, epley: 213.5, brzycki: 219.6 }
+const CUSTOM_BODY_PART = BODYPARTS.includes('waist') ? 'waist' : BODYPARTS[0]
 
 const byName = Object.fromEntries(TOOLS.map(t => [t.name, t.handler]))
 
@@ -122,6 +123,15 @@ function routineEditState() {
       ])
     ],
     exWeights: { plank: { w: 0, d: '2026-08-01' } }
+  }
+}
+
+function customExerciseWriteState() {
+  return {
+    ...writeToolState(),
+    customEx: [
+      { id: 'c_existing', n: 'Ring row', bp: 'back', desc: 'Existing custom movement.', tg: '', eq: 'custom', custom: true }
+    ]
   }
 }
 
@@ -1548,6 +1558,180 @@ describe('edit_routine', () => {
   })
 })
 
+/* ---------- create_custom_exercise ---------- */
+
+describe('create_custom_exercise', () => {
+  test('dry_run previews a custom exercise without writing state or audit', () => {
+    withWriteToolEnv({ scopes: ['exercise:write'], state: customExerciseWriteState() }, ({ dataDir }) => {
+      const r = call('create_custom_exercise', {
+        name: '  Ring support hold  ',
+        body_part: CUSTOM_BODY_PART,
+        description: '  Hold top position on rings.  ',
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        exercise: {
+          id: 'c_preview',
+          name: 'Ring support hold',
+          body_part: CUSTOM_BODY_PART,
+          description: 'Hold top position on rings.'
+        },
+        changes: [{
+          path: 'customEx',
+          op: 'create_custom_exercise',
+          before: null,
+          after: {
+            id: 'c_preview',
+            n: 'Ring support hold',
+            bp: CUSTOM_BODY_PART,
+            desc: 'Hold top position on rings.',
+            tg: '',
+            eq: 'custom',
+            custom: true
+          }
+        }]
+      })
+      expect(readDiskState(dataDir).customEx).toHaveLength(1)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commit creates a custom exercise, increments revision and appends audit', () => {
+    withWriteToolEnv({ scopes: ['exercise:write'], state: customExerciseWriteState() }, ({ dataDir, token }) => {
+      const r = call('create_custom_exercise', {
+        name: 'Ring support hold',
+        body_part: CUSTOM_BODY_PART,
+        description: 'Hold top position on rings.',
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        exercise: {
+          name: 'Ring support hold',
+          body_part: CUSTOM_BODY_PART,
+          description: 'Hold top position on rings.'
+        }
+      })
+      expect(r.exercise.id).toMatch(/^c[a-z0-9]+$/)
+
+      const saved = readDiskState(dataDir)
+      expect(saved._revision).toBe(8)
+      expect(saved.customEx).toHaveLength(2)
+      expect(saved.customEx[1]).toEqual({
+        id: r.exercise.id,
+        n: 'Ring support hold',
+        bp: CUSTOM_BODY_PART,
+        desc: 'Hold top position on rings.',
+        tg: '',
+        eq: 'custom',
+        custom: true
+      })
+      expect(readAuditEvents(dataDir)).toMatchObject([{
+        uid: 'u1',
+        actor: `mcp-token:${token.id}`,
+        action: 'create_custom_exercise',
+        token_id: token.id,
+        revision_before: 7,
+        revision_after: 8,
+        details: {
+          exercise: {
+            id: r.exercise.id,
+            name: 'Ring support hold',
+            body_part: CUSTOM_BODY_PART
+          }
+        }
+      }])
+    })
+  })
+
+  test('rejects invalid names, duplicate names and unknown body parts', () => {
+    withWriteToolEnv({ scopes: ['exercise:write'], state: customExerciseWriteState() }, () => {
+      expect(() => call('create_custom_exercise', {
+        name: '   ',
+        body_part: CUSTOM_BODY_PART,
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/name must be a non-empty string/)
+
+      expect(() => call('create_custom_exercise', {
+        name: EXDB[0].n.toUpperCase(),
+        body_part: CUSTOM_BODY_PART,
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/already exists/)
+
+      expect(() => call('create_custom_exercise', {
+        name: 'ring row',
+        body_part: CUSTOM_BODY_PART,
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/already exists/)
+
+      expect(() => call('create_custom_exercise', {
+        name: 'Cable neck raise',
+        body_part: 'not-a-body-part',
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unknown body_part/)
+    })
+  })
+
+  test('commit rejects stale expected_revision without changing state', () => {
+    withWriteToolEnv({ scopes: ['exercise:write'], state: customExerciseWriteState() }, ({ dataDir }) => {
+      const r = call('create_custom_exercise', {
+        name: 'Ring support hold',
+        body_part: CUSTOM_BODY_PART,
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).customEx).toHaveLength(1)
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires a token with exercise:write scope', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: customExerciseWriteState() }, () => {
+      const r = call('create_custom_exercise', {
+        name: 'Ring support hold',
+        body_part: CUSTOM_BODY_PART,
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'exercise:write'
+        }
+      })
+    })
+  })
+})
+
 /* ---------- add_bodyweight ---------- */
 
 describe('add_bodyweight', () => {
@@ -1908,6 +2092,7 @@ describe('shared: no-state fallback', () => {
       override_day: { date: '2026-08-31', routine_id: 'rest', expected_revision: 0, dry_run: true },
       assign_weekday: { weekday: 1, routine_id: 'rest', expected_revision: 0, dry_run: true },
       edit_routine: { routine_id: 'routine', ops: [{ op: 'set_policy', policy: 'off' }], expected_revision: 0, dry_run: true },
+      create_custom_exercise: { name: 'Ring support hold', body_part: CUSTOM_BODY_PART, expected_revision: 0, dry_run: true },
       add_bodyweight: { date: '2026-08-31', weight: 78.4, expected_revision: 0, dry_run: true },
       log_workout: { routine_id: 'routine', duration_min: 60, entries: [{ exercise_id: 'exercise', sets: [{ w: 10, r: 10 }] }], expected_revision: 0, dry_run: true }
     }

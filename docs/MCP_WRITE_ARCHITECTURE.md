@@ -8,7 +8,7 @@ The design goal is simple: every write must be authenticated, scoped, validated,
 
 ## Implementation Status
 
-As of 2026-09-01:
+As of 2026-09-04:
 
 - Done: `api/state-service.js` owns API state reads and full-state replacement.
 - Done: `updateUserState(uid, mutation, options)` supports per-user locks, `_revision` increments and optional `expectedRevision` conflict checks.
@@ -22,8 +22,9 @@ As of 2026-09-01:
 - Done: `edit_routine` supports structured patch ops with `routine:write`: `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` and `reorder_exercise`.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
 - Done: `log_workout` stores a completed workout for an existing routine from structured JSON with `workout:write`, dry-run, revision checks and audit-backed commits.
+- Done: `create_custom_exercise` creates one custom exercise with `exercise:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: custom exercise creation, direct superset editing, freestyle workout logging and deeper shared workout/set validation.
+- Not done: direct superset editing, freestyle workout logging and deeper shared workout/set validation.
 
 ## Current State
 
@@ -590,7 +591,8 @@ assign_weekday
 edit_routine
 add_bodyweight
 log_workout
-future: custom exercise creation, direct superset editing, freestyle workout logging
+create_custom_exercise
+future: direct superset editing, freestyle workout logging
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

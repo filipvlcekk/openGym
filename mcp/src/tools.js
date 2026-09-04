@@ -12,12 +12,13 @@ import {
 import {
   modeOf, workoutVolume, setsDone, effectiveRoutine, effectiveRoutineId, bestWeightFor, defaultConfig, cleanupSg
 } from '../../frontend/src/lib/history.js'
-import { EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
+import { BODYPARTS, EXDB, EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
 import {
   estimate1RM, best1RM, bestSetOf, e1rmSeries, DEFAULT_FORMULA, REP_CAP
 } from '../../frontend/src/lib/onerm.js'
 import { loadOfWorkouts, rankOf, levelsOf } from '../../frontend/src/lib/muscles.js'
 import { displayScale, effortSummary, scaleName } from '../../frontend/src/lib/effort.js'
+import { uid } from '../../frontend/src/lib/format.js'
 import { POLICIES, nextPrescription } from '../../frontend/src/lib/progression.js'
 
 /* ---------- helpers ---------- */
@@ -489,6 +490,7 @@ const TARGET_FIELD_RULES = {
   speed: { min: 0 }
 }
 const TARGET_FIELDS = new Set(Object.keys(TARGET_FIELD_RULES))
+const BODY_PART_SET = new Set(BODYPARTS)
 const setPolicyOpSchema = z.object({
   op: z.literal('set_policy'),
   policy: z.enum(['off', 'linear', 'greyskull', 'double', 'time'])
@@ -555,6 +557,13 @@ const workoutEntrySchema = z.object({
   exercise_id: z.string().min(1),
   sets: z.array(z.union([repsWorkoutSetSchema, timeWorkoutSetSchema, cardioWorkoutSetSchema])).min(1).max(50)
 }).strict()
+const createCustomExerciseSchema = {
+  name: z.string().min(1).describe('Name for the new custom exercise. Trimmed before writing.'),
+  body_part: z.string().min(1).describe('Existing openGym body part id, for example chest, back, upper legs or cardio.'),
+  description: z.string().optional().describe('Optional setup/cue text. Trimmed and capped at 1000 characters.'),
+  expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+  dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
+}
 
 function routinePolicy(routine) {
   return routine?.prog || routine?.policy || 'off'
@@ -817,6 +826,53 @@ function applyEditRoutineOps(current, routineId, ops) {
       }
       return next
     })
+  }
+}
+
+function normalizeCustomExerciseInput(S, { name, body_part, description }) {
+  const n = String(name || '').trim()
+  if (!n) fail('EINVAL', 'name must be a non-empty string')
+  if (!BODY_PART_SET.has(body_part)) fail('EINVAL', `unknown body_part ${JSON.stringify(body_part)}`)
+
+  const duplicate = [...EXDB, ...(S.customEx || [])]
+    .find(ex => String(ex.n || '').trim().toLowerCase() === n.toLowerCase())
+  if (duplicate) fail('EINVAL', `exercise ${JSON.stringify(duplicate.n)} already exists`)
+
+  return {
+    n,
+    bp: body_part,
+    desc: String(description || '').trim().slice(0, 1000),
+    tg: '',
+    eq: 'custom',
+    custom: true
+  }
+}
+
+function makeCustomExerciseId(existing = []) {
+  const used = new Set(existing.map(ex => ex.id))
+  for (let i = 0; i < 20; i += 1) {
+    const id = `c${uid()}`
+    if (!used.has(id) && !EXIDX[id]) return id
+  }
+  fail('EINVAL', 'could not generate unique custom exercise id')
+}
+
+function customExerciseChange(S, input, id = 'c_preview') {
+  const normalized = normalizeCustomExerciseInput(S, input)
+  const after = { id, ...normalized }
+  return {
+    exercise: {
+      id,
+      name: normalized.n,
+      body_part: normalized.bp,
+      description: normalized.desc
+    },
+    changes: [{
+      path: 'customEx',
+      op: 'create_custom_exercise',
+      before: null,
+      after
+    }]
   }
 }
 
@@ -1581,6 +1637,63 @@ export const editRoutine = {
   }
 }
 
+/** create_custom_exercise — write one custom exercise definition. */
+export const createCustomExercise = {
+  name: 'create_custom_exercise',
+  description: 'Create one custom exercise in the profile catalogue. Requires OPENGYM_MCP_TOKEN with exercise:write. Use edit_routine.add_exercise separately to add it to a routine.',
+  schema: createCustomExerciseSchema,
+  handler: ({ name, body_part, description = '', expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'exercise:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const preview = customExerciseChange(S, { name, body_part, description })
+    const revision = revisionOf(S)
+
+    if (dry_run) {
+      return {
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision,
+        exercise: preview.exercise,
+        changes: preview.changes
+      }
+    }
+
+    const id = makeCustomExerciseId(S.customEx || [])
+    const committed = customExerciseChange(S, { name, body_part, description }, id)
+    const result = states.updateUserState(auth.token.uid, current => {
+      const normalized = normalizeCustomExerciseInput(current, { name, body_part, description })
+      return {
+        ...current,
+        customEx: [...(current.customEx || []), { id, ...normalized }]
+      }
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'create_custom_exercise',
+      expectedRevision: expected_revision,
+      details: { exercise: committed.exercise }
+    })
+    if (!result.ok) return result
+
+    return {
+      ok: true,
+      dry_run: false,
+      changed: true,
+      revision_before: revision,
+      revision_after: result.revision,
+      exercise: committed.exercise,
+      changes: committed.changes
+    }
+  }
+}
+
 /** add_bodyweight — write one body-weight weigh-in for a date. */
 export const addBodyweight = {
   name: 'add_bodyweight',
@@ -1734,7 +1847,7 @@ export const logWorkout = {
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, addBodyweight, logWorkout
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, createCustomExercise, addBodyweight, logWorkout
 ]
 
 function noState() {

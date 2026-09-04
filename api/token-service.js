@@ -8,6 +8,7 @@ export const TOKEN_SCOPES = new Set([
   'schedule:write',
   'routine:write',
   'workout:write',
+  'exercise:write',
   'bodyweight:write'
 ]);
 

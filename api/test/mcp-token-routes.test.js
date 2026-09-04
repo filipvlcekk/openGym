@@ -51,7 +51,7 @@ test('POST /api/mcp/tokens rejects unauthenticated callers', async () => {
 
 test('POST /api/mcp/tokens creates a scoped token and returns the raw token once', async () => {
   await withRoutes({
-    body: { name: 'Claude Desktop', scopes: ['schedule:write', 'routine:write'] }
+    body: { name: 'Claude Desktop', scopes: ['schedule:write', 'routine:write', 'exercise:write'] }
   }, async ({ routes }) => {
     const res = await call(routes, 'POST /api/mcp/tokens');
 
@@ -59,7 +59,7 @@ test('POST /api/mcp/tokens creates a scoped token and returns the raw token once
     assert.match(res.body.token, /^ogmcp_tok_/);
     assert.equal(res.body.record.uid, 'u1');
     assert.equal(res.body.record.name, 'Claude Desktop');
-    assert.deepEqual(res.body.record.scopes, ['schedule:write', 'routine:write']);
+    assert.deepEqual(res.body.record.scopes, ['schedule:write', 'routine:write', 'exercise:write']);
     assert.equal(res.body.record.hash, undefined);
     assert.equal(res.body.record.secret, undefined);
   });

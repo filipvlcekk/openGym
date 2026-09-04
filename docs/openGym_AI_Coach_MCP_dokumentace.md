@@ -610,7 +610,7 @@ Slouží pro strukturální úpravu programu.
 
 Operace by měla být co nejvíce explicitní.
 
-Aktuální implementace v tomto forku je patch-based: `edit_routine` umí `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` a `reorder_exercise`. Neumí zatím vytvořit nový custom cvik ani přímo upravovat superset skupiny.
+Aktuální implementace v tomto forku je patch-based: `edit_routine` umí `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` a `reorder_exercise`. Nový custom cvik se vytváří samostatným `create_custom_exercise`; `edit_routine` ho potom umí přidat do rutiny podle id. Neumí zatím přímo upravovat superset skupiny.
 
 Nevhodné:
 
@@ -651,13 +651,45 @@ Výhodou je menší prostor pro chybný nebo destruktivní zápis oproti nahraze
 
 Současný MCP kontrakt používá název `policy`, ale openGym frontend ukládá rutinní progression do pole `prog`. MCP vrstva proto tuto hranici normalizuje: navenek ukazuje `policy`, do state zapisuje kompatibilní `prog`.
 
-`add_exercise` používá existující cviky z katalogu nebo `customEx`. LLM tedy může z věty uživatele najít vhodné `exercise_id`, ale pokud chce uživatel úplně nový custom cvik, bude to samostatná budoucí operace.
+`add_exercise` používá existující cviky z katalogu nebo `customEx`. LLM tedy může z věty uživatele najít vhodné `exercise_id`; pokud chce uživatel úplně nový custom cvik, nejdřív ho vytvoří přes `create_custom_exercise`.
 
 `remove_exercise` a `reorder_exercise` po změně volají stejný `cleanupSg` helper jako frontend, aby v rutině nezůstaly osiřelé superset id.
 
 ---
 
-## 11.4 `log_workout`
+## 11.4 `create_custom_exercise`
+
+Slouží pro vytvoření jednoho vlastního cviku v profilu. Tool nemění rutiny; přidání nového cviku
+do rutiny zůstává samostatný krok přes `edit_routine.add_exercise`.
+
+Příklad:
+
+```json
+{
+  "name": "Ring support hold",
+  "body_part": "waist",
+  "description": "Hold top position on rings.",
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+První verze umí:
+
+- použít scope `exercise:write`,
+- oříznout název a popis,
+- odmítnout prázdný název,
+- odmítnout neznámou body part,
+- odmítnout duplicitní název proti katalogu i `customEx`,
+- vygenerovat id serverově,
+- uložit tvar kompatibilní s frontendem: `{ id, n, bp, desc, tg: '', eq: 'custom', custom: true }`,
+- použít `dry_run`, `expected_revision`, per-user lock a audit commit.
+
+Neumí zatím editovat nebo mazat existující custom cviky.
+
+---
+
+## 11.5 `log_workout`
 
 V tomto forku je `log_workout` implementovaný jako strukturovaný zápis hotového workoutu podle existující rutiny.
 
@@ -705,7 +737,7 @@ Neumí zatím freestyle workout, fuzzy matching názvů cviků, přidání nové
 
 ---
 
-## 11.5 `add_bodyweight`
+## 11.6 `add_bodyweight`
 
 Jednoduchý write tool. V tomto forku je implementovaný jako `add_bodyweight` se scope `bodyweight:write`, dry-run režimem, `expected_revision` kontrolou a audit commitem:
 
@@ -1999,7 +2031,7 @@ docs/MCP_WRITE_ARCHITECTURE.md
 
 Základní rozhodnutí: nejdřív vytvořit sdílenou `updateUserState(uid, mutation, options)` vrstvu s per-user lockem, revision konflikty, atomickým zápisem a audit logem. Až nad ní stavět jednotlivé write tooly.
 
-Stav k 2026-08-30:
+Stav k 2026-09-04:
 
 - hotovo: `api/state-service.js`,
 - hotovo: `_revision` + per-user lock v `updateUserState`,
@@ -2013,8 +2045,9 @@ Stav k 2026-08-30:
 - hotovo: `edit_routine` pro `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise` a `reorder_exercise` s `routine:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `log_workout` pro zapsání hotového workoutu podle existující rutiny se `workout:write`, dry-run, revision checkem a audit commitem,
+- hotovo: `create_custom_exercise` pro vytvoření jednoho vlastního cviku se `exercise:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
-- zbývá: vytvoření custom cviku, přímá editace superset skupin, freestyle workout logging a hlubší sdílená validace workout setů.
+- zbývá: přímá editace superset skupin, freestyle workout logging a hlubší sdílená validace workout setů.
 
 Současně:
 
@@ -2038,7 +2071,6 @@ AI umí plán nejen navrhnout, ale i uložit.
 Zbývá doplnit:
 
 ```text
-create_custom_exercise
 edit_superset_groups
 ```
 
