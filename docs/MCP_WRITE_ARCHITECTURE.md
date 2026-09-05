@@ -37,8 +37,8 @@ Current persistence model:
 - `state-<uid>.json` stores the user's openGym state.
 - `PUT /api/data` accepts a full state object from the signed-in web client.
 - The API writes state with temp-file plus `rename`.
-- MCP currently reads the same state file through `mcp/src/state.js`.
-- MCP has no write tools and no separate auth.
+- MCP read tools currently read the same state file through `mcp/src/state.js`.
+- MCP write tools use `OPENGYM_MCP_TOKEN` auth and write through the shared state service.
 
 The important existing gap is not atomicity alone. `rename` prevents a partially-written file, but it does not prevent lost updates when two writers read the same old state and later overwrite each other.
 
@@ -160,6 +160,7 @@ schedule:write   override_day, assign_weekday
 routine:write    edit_routine
 workout:write    log_workout, log_freestyle_workout
 bodyweight:write add_bodyweight
+exercise:write   create_custom_exercise
 ```
 
 Read tools can stay filesystem-only initially, but once write auth exists it is cleaner to require token auth for write tools and leave read-only tools unchanged.
@@ -264,6 +265,7 @@ edit_routine
 add_bodyweight
 log_workout
 log_freestyle_workout
+create_custom_exercise
 ```
 
 `override_day`:

@@ -2058,6 +2058,7 @@ edit_routine
 add_bodyweight
 log_workout
 log_freestyle_workout
+create_custom_exercise
 ```
 
 Detailní architektonický návrh Phase 2 je v samostatném dokumentu:
