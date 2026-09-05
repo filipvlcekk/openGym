@@ -2326,6 +2326,7 @@ describe('log_freestyle_workout', () => {
       })
       const saved = readDiskState(dataDir)
       expect(saved._revision).toBe(7)
+      expect(saved.bodyweight).toEqual([])
       expect(saved.workouts).toHaveLength(1)
       expect(saved.exWeights['0426']).toEqual({ w: 20, d: '2026-08-01' })
       expect(readAuditEvents(dataDir)).toEqual([])
@@ -2365,6 +2366,7 @@ describe('log_freestyle_workout', () => {
 
       const saved = readDiskState(dataDir)
       expect(saved._revision).toBe(8)
+      expect(saved.workouts).toHaveLength(2)
       expect(saved.workouts[1]).toMatchObject({
         id: r.workout.id,
         d: '2026-09-04',
