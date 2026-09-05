@@ -108,6 +108,12 @@ function currentISO() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
 
+function isValidISODate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const d = new Date(value + 'T12:00:00Z')
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
 function daysBeforeISO(iso, days) {
   const d = new Date(iso + 'T12:00:00')
   d.setDate(d.getDate() - days)
@@ -238,6 +244,72 @@ function normalizeWorkoutSets(exerciseId, cfg, sets) {
   })
 }
 
+function inferFreestyleMode(S, exerciseId, target, sets) {
+  if (target?.mode) return target.mode
+  const ex = requireLibraryExercise(S, exerciseId)
+  if (ex.bp === 'cardio') return 'cardio'
+  const first = sets[0] || {}
+  if (first.sec != null) return 'time'
+  if (first.min != null) return 'cardio'
+  return 'reps'
+}
+
+function inferredTargetFromSets(mode, sets) {
+  const first = sets[0] || {}
+  if (mode === 'cardio') return { mode: 'cardio', sets: sets.length, min: first.min, speed: first.speed || 0 }
+  if (mode === 'time') return { sets: sets.length, sec: first.sec, weight: first.w || 0 }
+  return { sets: sets.length, reps: first.r, weight: first.w || 0 }
+}
+
+const FREESTYLE_NUMERIC_TARGET_FIELDS = new Set(['sets', 'reps', 'weight', 'repsMin', 'repsMax', 'sec', 'min', 'speed'])
+
+function validateFreestyleTargetValues(target = {}) {
+  for (const [field, value] of Object.entries(target)) {
+    if (FREESTYLE_NUMERIC_TARGET_FIELDS.has(field)) {
+      validateTargetField(field, value)
+      continue
+    }
+    if (field === 'mode') {
+      if (!['reps', 'time', 'cardio'].includes(value)) fail('EINVAL', `unknown exercise mode ${JSON.stringify(value)}`)
+      continue
+    }
+    if (field === 'bodyweight' || field === 'side') {
+      if (typeof value !== 'boolean') fail('EINVAL', `${field} must be a boolean`)
+      continue
+    }
+    fail('EINVAL', `unsupported freestyle target field ${JSON.stringify(field)}`)
+  }
+}
+
+function validateFreestyleTargetForMode(mode, target = {}) {
+  const allowed = {
+    reps: new Set(['mode', 'sets', 'reps', 'repsMin', 'repsMax', 'weight', 'bodyweight', 'side']),
+    time: new Set(['mode', 'sets', 'sec', 'weight', 'bodyweight', 'side']),
+    cardio: new Set(['mode', 'sets', 'min', 'speed'])
+  }[mode]
+  for (const field of Object.keys(target)) {
+    if (!allowed.has(field)) fail('EINVAL', `${field} is not valid for ${mode} mode`)
+  }
+  if (target.repsMin != null && target.repsMax != null && target.repsMax < target.repsMin) {
+    fail('EINVAL', 'repsMax must be >= repsMin')
+  }
+}
+
+function normalizeFreestyleTarget(S, exerciseId, target = {}, sets) {
+  const ex = requireLibraryExercise(S, exerciseId)
+  const mode = inferFreestyleMode(S, exerciseId, target, sets)
+  if (ex.bp === 'cardio' && mode !== 'cardio') fail('EINVAL', `cardio exercise ${JSON.stringify(exerciseId)} must use mode "cardio"`)
+  validateFreestyleTargetValues(target)
+  validateFreestyleTargetForMode(mode, target)
+  const normalized = {
+    id: exerciseId,
+    ...defaultConfig(exerciseId, mode),
+    ...inferredTargetFromSets(mode, sets),
+    ...target
+  }
+  return { ...normalized, mode }
+}
+
 function topWeightForEntry(entry) {
   const weights = (entry.sets || [])
     .filter(set => set.done)
@@ -302,6 +374,65 @@ function buildLoggedWorkout(S, { routine_id, date, duration_min, bodyweight, ent
   return workout
 }
 
+function normalizeFreestyleWorkoutName(name) {
+  if (name == null) return 'Freestyle'
+  if (typeof name !== 'string') fail('EINVAL', 'name must be a string')
+  const trimmed = name.trim()
+  if (!trimmed) fail('EINVAL', 'name must be a non-empty string')
+  return trimmed.slice(0, 120)
+}
+
+function validateFreestyleWorkoutInput(S, durationMin, entries) {
+  const duration = requireInteger(durationMin, 'duration_min must be an integer between 1 and 1440')
+  if (duration < 1 || duration > 1440) fail('EINVAL', 'duration_min must be an integer between 1 and 1440')
+  if (!Array.isArray(entries) || !entries.length) fail('EINVAL', 'log_freestyle_workout needs at least one entry')
+  if (entries.length > 50) fail('EINVAL', 'log_freestyle_workout accepts at most 50 entries')
+
+  const seen = new Set()
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') fail('EINVAL', 'workout entry must be an object')
+    if (!entry.exercise_id) fail('EINVAL', 'workout entry needs exercise_id')
+    if (seen.has(entry.exercise_id)) fail('EINVAL', `duplicate workout entry for exercise ${JSON.stringify(entry.exercise_id)}`)
+    seen.add(entry.exercise_id)
+    requireLibraryExercise(S, entry.exercise_id)
+    const target = normalizeFreestyleTarget(S, entry.exercise_id, entry.target || {}, entry.sets)
+    normalizeWorkoutSets(entry.exercise_id, target, entry.sets)
+  }
+  return duration
+}
+
+function buildFreestyleWorkout(S, { name, date, duration_min, bodyweight, entries }) {
+  if (!isValidISODate(date)) fail('EINVAL', 'date must be a valid YYYY-MM-DD date')
+  const duration = validateFreestyleWorkoutInput(S, duration_min, entries)
+  const start = workoutTimestamp(date)
+  const workoutEntries = entries.map(entry => {
+    const target = normalizeFreestyleTarget(S, entry.exercise_id, entry.target || {}, entry.sets)
+    const sets = normalizeWorkoutSets(entry.exercise_id, target, entry.sets)
+    const result = { id: entry.exercise_id, sets, topW: null, target }
+    const topW = topWeightForEntry(result)
+    if (topW > 0) result.topW = topW
+    return result
+  })
+
+  const prs = workoutEntries
+    .filter(entry => topWeightForEntry(entry) > bestWeightFor({ ...S, workouts: S.workouts || [] }, entry.id))
+    .map(entry => entry.id)
+
+  const workout = {
+    id: makeWorkoutId(),
+    d: date,
+    start,
+    end: start + duration * 60000,
+    routineId: null,
+    name: normalizeFreestyleWorkoutName(name),
+    bw: normalizeWorkoutBodyweight(bodyweight),
+    entries: workoutEntries,
+    prs
+  }
+  workout.vol = workoutVolume(workout)
+  return workout
+}
+
 function exWeightChanges(S, workout) {
   return (workout.entries || [])
     .map(entry => {
@@ -339,7 +470,11 @@ function applyLoggedWorkout(current, workout) {
   }
 }
 
-function workoutSummary(workout) {
+function exerciseForSummary(S, exerciseId) {
+  return (S ? exerciseFromLibrary(S, exerciseId) : null) || exOr(exerciseId)
+}
+
+function workoutSummary(workout, S = null) {
   return {
     id: workout.id || null,
     date: workout.d,
@@ -353,7 +488,7 @@ function workoutSummary(workout) {
     duration: workout.end && workout.start ? friendlyDuration(workout.end - workout.start) : null,
     entries: (workout.entries || []).map(entry => {
       const cfg = { ...(entry.target || {}), id: entry.id }
-      const ex = exOr(entry.id)
+      const ex = exerciseForSummary(S, entry.id)
       return {
         id: entry.id,
         name: ex.n,
@@ -563,6 +698,25 @@ const cardioWorkoutSetSchema = z.object({
 }).strict()
 const workoutEntrySchema = z.object({
   exercise_id: z.string().min(1),
+  sets: z.array(z.union([repsWorkoutSetSchema, timeWorkoutSetSchema, cardioWorkoutSetSchema])).min(1).max(50)
+}).strict()
+const ISO_DATE_SCHEMA = z.string().refine(isValidISODate, 'date must be a valid YYYY-MM-DD date')
+const freestyleTargetSchema = z.object({
+  mode: z.enum(['reps', 'time', 'cardio']).optional(),
+  sets: z.number().int().min(1).optional(),
+  reps: z.number().int().min(1).optional(),
+  weight: z.number().min(0).optional(),
+  repsMin: z.number().int().min(1).optional(),
+  repsMax: z.number().int().min(1).optional(),
+  sec: z.number().int().min(1).optional(),
+  min: z.number().min(1).optional(),
+  speed: z.number().min(0).optional(),
+  bodyweight: z.boolean().optional(),
+  side: z.boolean().optional()
+}).strict()
+const freestyleWorkoutEntrySchema = z.object({
+  exercise_id: z.string().min(1),
+  target: freestyleTargetSchema.optional(),
   sets: z.array(z.union([repsWorkoutSetSchema, timeWorkoutSetSchema, cardioWorkoutSetSchema])).min(1).max(50)
 }).strict()
 const createCustomExerciseSchema = {
@@ -1902,7 +2056,7 @@ export const logWorkout = {
     const changes = loggedWorkoutChanges(S, workout)
     const revision = revisionOf(S)
     const unit = S.unit || 'kg'
-    const summary = workoutSummary(workout)
+    const summary = workoutSummary(workout, S)
 
     if (dry_run) {
       return {
@@ -1946,10 +2100,63 @@ export const logWorkout = {
   }
 }
 
+/** log_freestyle_workout — write one finished workout without requiring a routine. */
+export const logFreestyleWorkout = {
+  name: 'log_freestyle_workout',
+  description: 'Log a completed freestyle workout from structured JSON. Requires OPENGYM_MCP_TOKEN with workout:write. Use dry_run=true first to preview before committing.',
+  schema: {
+    name: z.string().optional().describe('Optional workout name. Trimmed, defaults to Freestyle, capped at 120 characters.'),
+    date: ISO_DATE_SCHEMA.optional().describe('Workout date as YYYY-MM-DD. Defaults to today.'),
+    duration_min: z.number().int().min(1).max(1440).describe('Completed workout duration in minutes.'),
+    bodyweight: z.number().positive().optional().describe('Optional body weight at workout time, in the profile unit. Rounded to one decimal.'),
+    entries: z.array(freestyleWorkoutEntrySchema).min(1).max(50).describe('Completed freestyle entries keyed by catalog or custom exercise ids.'),
+    expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
+    dry_run: z.boolean().optional().describe('When true, preview the finished workout without writing. Defaults to true.')
+  },
+  handler: ({ name, date = currentISO(), duration_min, bodyweight, entries, expected_revision, dry_run = true }) => {
+    const auth = verifyMcpWriteToken({ requiredScope: 'workout:write' })
+    if (!auth.ok) return auth
+
+    const dataDir = process.env.OPENGYM_DATA
+    const states = writeStateServices(dataDir)
+    const S = states.readUserState(auth.token.uid)
+    if (!S) return noState()
+
+    const workout = buildFreestyleWorkout(S, { name, date, duration_min, bodyweight, entries })
+    const changes = loggedWorkoutChanges(S, workout)
+    const revision = revisionOf(S)
+    const unit = S.unit || 'kg'
+    const summary = workoutSummary(workout, S)
+
+    if (dry_run) {
+      return { ok: true, dry_run: true, would_change: true, revision, unit, workout: summary, changes }
+    }
+
+    const result = states.updateUserState(auth.token.uid, current => {
+      return applyLoggedWorkout(current, workout)
+    }, {
+      actor: `mcp-token:${auth.token.id}`,
+      tokenId: auth.token.id,
+      operation: 'log_freestyle_workout',
+      expectedRevision: expected_revision,
+      details: {
+        date,
+        name: workout.name,
+        workout_id: workout.id,
+        sets_done: summary.sets_done,
+        volume: summary.volume
+      }
+    })
+    if (!result.ok) return result
+
+    return { ok: true, dry_run: false, changed: true, revision_before: revision, revision_after: result.revision, unit, workout: summary, changes }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, createCustomExercise, addBodyweight, logWorkout
+  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, createCustomExercise, addBodyweight, logWorkout, logFreestyleWorkout
 ]
 
 function noState() {
