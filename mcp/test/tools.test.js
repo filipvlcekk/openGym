@@ -2324,7 +2324,10 @@ describe('log_freestyle_workout', () => {
           { path: 'exWeights.0426', before: 20, after: 25 }
         ]
       })
-      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+      const saved = readDiskState(dataDir)
+      expect(saved._revision).toBe(7)
+      expect(saved.workouts).toHaveLength(1)
+      expect(saved.exWeights['0426']).toEqual({ w: 20, d: '2026-08-01' })
       expect(readAuditEvents(dataDir)).toEqual([])
     })
   })
