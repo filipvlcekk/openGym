@@ -2339,6 +2339,7 @@ describe('log_freestyle_workout', () => {
         name: 'Hotel gym',
         date: '2026-09-04',
         duration_min: 45,
+        bodyweight: 78.4,
         entries: [
           { exercise_id: '0426', target: { mode: 'reps', sets: 2, reps: 10, weight: 25 }, sets: [{ w: 25, r: 10 }, { w: 25, r: 8 }] },
           { exercise_id: '1323', target: { mode: 'time', sets: 1, sec: 60, weight: 0 }, sets: [{ sec: 60, w: 0 }] }
@@ -2359,7 +2360,8 @@ describe('log_freestyle_workout', () => {
           name: 'Hotel gym',
           sets_done: 3,
           volume: 450,
-          prs: ['0426']
+          prs: ['0426'],
+          bodyweight: 78.4
         }
       })
       expect(typeof r.workout.id).toBe('string')
@@ -2372,9 +2374,11 @@ describe('log_freestyle_workout', () => {
         d: '2026-09-04',
         routineId: null,
         name: 'Hotel gym',
+        bw: 78.4,
         vol: 450,
         prs: ['0426']
       })
+      expect(saved.bodyweight).toEqual([])
       expect(saved.workouts[1].entries.map(e => e.id)).toEqual(['0426', '1323'])
       expect(saved.workouts[1].entries[0].sets).toEqual([
         { w: 25, r: 10, done: true },
