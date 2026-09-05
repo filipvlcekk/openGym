@@ -347,7 +347,7 @@ Expected: FAIL because `log_freestyle_workout` is not registered yet.
 **Files:**
 - Modify: `mcp/src/tools.js`
 
-- [ ] **Step 1: Add a reusable calendar date helper**
+- [x] **Step 1: Add a reusable calendar date helper**
 
 Add near `currentISO()`:
 
@@ -359,7 +359,7 @@ function isValidISODate(value) {
 }
 ```
 
-- [ ] **Step 2: Add freestyle schemas**
+- [x] **Step 2: Add freestyle schemas**
 
 Add:
 
@@ -387,7 +387,7 @@ const freestyleWorkoutEntrySchema = z.object({
 
 Use `ISO_DATE_SCHEMA.optional()` for the new tool date. Do not change existing tool schemas in this chunk. Handler tests call tool handlers directly, so the builder must still validate dates manually.
 
-- [ ] **Step 3: Make workout summary custom-exercise aware**
+- [x] **Step 3: Make workout summary custom-exercise aware**
 
 Add a resolver before `workoutSummary`:
 
@@ -421,7 +421,7 @@ Update existing calls inside `logWorkout`:
 const summary = workoutSummary(workout, S)
 ```
 
-- [ ] **Step 4: Add freestyle target normalization helpers**
+- [x] **Step 4: Add freestyle target normalization helpers**
 
 Add after `normalizeWorkoutSets`:
 
@@ -493,7 +493,7 @@ function normalizeFreestyleTarget(S, exerciseId, target = {}, sets) {
 }
 ```
 
-- [ ] **Step 5: Add freestyle workout builder**
+- [x] **Step 5: Add freestyle workout builder**
 
 Add after `buildLoggedWorkout`:
 
@@ -558,7 +558,7 @@ function buildFreestyleWorkout(S, { name, date, duration_min, bodyweight, entrie
 }
 ```
 
-- [ ] **Step 6: Add and register the tool**
+- [x] **Step 6: Add and register the tool**
 
 Add after `logWorkout`:
 
@@ -618,7 +618,7 @@ export const logFreestyleWorkout = {
 
 Add `logFreestyleWorkout` to the exported `TOOLS` array.
 
-- [ ] **Step 7: Run targeted MCP tests**
+- [x] **Step 7: Run targeted MCP tests**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
