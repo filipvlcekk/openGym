@@ -534,6 +534,16 @@ describe('get_workout', () => {
     expect(() => call('get_workout', {})).toThrow()
   })
 
+  test('keeps unknown PR exercise ids readable instead of replacing them with fallback names', () => {
+    S.workouts = [{
+      id: 'legacy-pr', d: '2026-07-25', start: 0, end: 1800000, routineId: 'x', name: 'Legacy',
+      bw: null, vol: 0, prs: ['deleted_custom'], entries: []
+    }]
+    _seedStateForTests(S)
+
+    expect(call('get_workout', { workout_id: 'legacy-pr' }).prs).toEqual(['deleted_custom'])
+  })
+
   test('renders reps/time/cardio set labels in the lib format on a synthetic workout', () => {
     // The starter routine has only reps-mode exercises — synthesise a workout that includes a
     // timed plank and a cardio row so the label rendering is actually exercised.
@@ -2448,6 +2458,36 @@ describe('log_freestyle_workout', () => {
         mode: 'reps'
       })
       expect(readDiskState(dataDir).workouts).toHaveLength(1)
+    })
+  })
+
+  test('committed freestyle custom exercises keep their names in workout readback', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: 'c_ring_row', sets: [{ w: 0, r: 12 }] }],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      S = readDiskState(dataDir)
+      _seedStateForTests(S)
+      const readback = call('get_workout', { workout_id: r.workout.id })
+      expect(readback.entries[0]).toMatchObject({
+        id: 'c_ring_row',
+        name: 'Ring row',
+        body_part: 'back',
+        mode: 'reps'
+      })
+
+      const history = call('exercise_history', { exercise_id: 'c_ring_row' })
+      expect(history.exercise).toMatchObject({
+        id: 'c_ring_row',
+        name: 'Ring row',
+        body_part: 'back',
+        mode: 'reps'
+      })
     })
   })
 

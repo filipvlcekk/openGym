@@ -24,7 +24,7 @@ import { POLICIES, nextPrescription } from '../../frontend/src/lib/progression.j
 /* ---------- helpers ---------- */
 
 function entryView(e, S) {
-  const ex = exOr(e.id)
+  const ex = exerciseForSummary(S, e.id)
   // Spread id into the cfg the way every call site in the app does (Workout.jsx, Stats.jsx,
   // progression.js) — the sheet saves a cardio target as {sets, min, speed} with no id and no
   // mode, so modeOf needs the id to fall through to isCardio(id).
@@ -57,7 +57,7 @@ function prTable(S, formula) {
         if (!s.done) continue
         const est = estimate1RM(s.w, s.r, formula)
         if (est == null) continue
-        const ex = exOr(e.id)
+        const ex = exerciseForSummary(S, e.id)
         const prev = byId.get(e.id)
         if (!prev || est > prev.est) {
           // exId as well as exName: the consumer needs an id, not a name — exOr() treats any
@@ -578,7 +578,7 @@ function stallCandidateFor(S, routine, cfg, window) {
   const noImprovement = bestEstimateChange <= 0
   if (!(noImprovement && missedTargetSessions >= 2) && missedTargetSessions < 3) return null
 
-  const ex = exOr(cfg.id)
+  const ex = exerciseForSummary(S, cfg.id)
   return {
     exercise: { id: cfg.id, name: ex.n, body_part: ex.bp || null, mode: 'reps' },
     routine: { id: routine.id, name: routine.name, emoji: routine.emoji || null },
@@ -1210,7 +1210,7 @@ export const getRoutine = {
       policy_name: policyName(routinePolicy(r)),
       unit: S.unit || 'kg',
       exercises: (r.ex || []).map((cfg, i) => {
-        const ex = exOr(cfg.id)
+        const ex = exerciseForSummary(S, cfg.id)
         const mode = modeOf(cfg)
         return {
           position: i + 1,
@@ -1370,7 +1370,7 @@ export const getWorkout = {
       sets_done: setsDone(w),
       sets_planned: plannedSets(w),
       duration: w.end && w.start ? friendlyDuration(w.end - w.start) : null,
-      prs: (w.prs || []).map(id => EXIDX[id]?.n || id),
+      prs: (w.prs || []).map(id => exerciseFromLibrary(S, id)?.n || id),
       entries: (w.entries || []).map(e => entryView(e, S))
     }
   }
@@ -1397,7 +1397,7 @@ export const exerciseHistory = {
       .filter(Boolean)
       .sort((a, b) => (b.workout.d || '').localeCompare(a.workout.d || ''))
 
-    const ex = exOr(exercise_id)
+    const ex = exerciseForSummary(S, exercise_id)
     const sessions = rows.slice(0, lim).map(({ workout: w, entry }) => {
       const view = doneEntryView(entry, S)
       return {
@@ -1537,7 +1537,7 @@ export const estimate1rm = {
     if (!S) return noState()
     const f = formula || DEFAULT_FORMULA
     if (exercise_id) {
-      const ex = exOr(exercise_id)
+      const ex = exerciseForSummary(S, exercise_id)
       const best = best1RM(S, exercise_id, f)
       const series = e1rmSeries(S, exercise_id, f)
       // A null best has two very different causes: never trained, or trained only above the
@@ -1611,7 +1611,7 @@ export const progressionNext = {
     const cfg = (routine.ex || []).find(x => x.id === exercise_id)
     if (!cfg) { const e = new Error(`routine ${JSON.stringify(routine_id)} has no exercise with id ${JSON.stringify(exercise_id)}`); e.code = 'ENOENT'; throw e }
 
-    const ex = exOr(exercise_id)
+    const ex = exerciseForSummary(S, exercise_id)
     const mode = modeOf(cfg)
     const p = nextPrescription(S, cfg, routine)
     const unit = S.unit || 'kg'
