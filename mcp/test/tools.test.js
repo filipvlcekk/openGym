@@ -187,6 +187,15 @@ function workoutWriteState() {
   }
 }
 
+function freestyleWorkoutWriteState() {
+  return {
+    ...workoutWriteState(),
+    customEx: [
+      { id: 'c_ring_row', n: 'Ring row', bp: 'back', desc: 'Strict ring row.', tg: '', eq: 'custom', custom: true }
+    ]
+  }
+}
+
 function withWriteToolEnv({ scopes = ['schedule:write'], state = writeToolState() } = {}, fn) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-override-day-'))
   const prevData = process.env.OPENGYM_DATA
@@ -2277,6 +2286,330 @@ describe('log_workout', () => {
   })
 })
 
+/* ---------- log_freestyle_workout ---------- */
+
+describe('log_freestyle_workout', () => {
+  test('previews a freestyle workout without writing or auditing', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_freestyle_workout', {
+        name: '  Hotel gym  ',
+        date: '2026-09-04',
+        duration_min: 45,
+        bodyweight: 78.4,
+        entries: [
+          { exercise_id: '1323', target: { mode: 'time', sets: 2, sec: 60, weight: 0 }, sets: [{ sec: 60, w: 0 }, { sec: 45, w: 0 }] },
+          { exercise_id: '0426', target: { mode: 'reps', sets: 2, reps: 10, weight: 25 }, sets: [{ w: 25, r: 10 }, { w: 25, r: 8 }] }
+        ],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: true,
+        would_change: true,
+        revision: 7,
+        unit: 'kg',
+        workout: {
+          date: '2026-09-04',
+          routine_id: null,
+          name: 'Hotel gym',
+          sets_done: 4,
+          volume: 450,
+          prs: ['0426'],
+          bodyweight: 78.4
+        },
+        changes: [
+          { path: 'workouts', before: 1, after: 2 },
+          { path: 'exWeights.0426', before: 20, after: 25 }
+        ]
+      })
+      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('commits a freestyle workout with routineId null and audit details', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir, token }) => {
+      const r = call('log_freestyle_workout', {
+        name: 'Hotel gym',
+        date: '2026-09-04',
+        duration_min: 45,
+        entries: [
+          { exercise_id: '0426', target: { mode: 'reps', sets: 2, reps: 10, weight: 25 }, sets: [{ w: 25, r: 10 }, { w: 25, r: 8 }] },
+          { exercise_id: '1323', target: { mode: 'time', sets: 1, sec: 60, weight: 0 }, sets: [{ sec: 60, w: 0 }] }
+        ],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(r).toMatchObject({
+        ok: true,
+        dry_run: false,
+        changed: true,
+        revision_before: 7,
+        revision_after: 8,
+        workout: {
+          date: '2026-09-04',
+          routine_id: null,
+          name: 'Hotel gym',
+          sets_done: 3,
+          volume: 450,
+          prs: ['0426']
+        }
+      })
+      expect(typeof r.workout.id).toBe('string')
+
+      const saved = readDiskState(dataDir)
+      expect(saved._revision).toBe(8)
+      expect(saved.workouts[1]).toMatchObject({
+        id: r.workout.id,
+        d: '2026-09-04',
+        routineId: null,
+        name: 'Hotel gym',
+        vol: 450,
+        prs: ['0426']
+      })
+      expect(saved.workouts[1].entries.map(e => e.id)).toEqual(['0426', '1323'])
+      expect(saved.workouts[1].entries[0].sets).toEqual([
+        { w: 25, r: 10, done: true },
+        { w: 25, r: 8, done: true }
+      ])
+      expect(saved.workouts[1].entries[1].sets).toEqual([{ sec: 60, w: 0, done: true }])
+      expect(saved.exWeights['0426']).toEqual({ w: 25, d: '2026-09-04' })
+      expect(readAuditEvents(dataDir)).toMatchObject([{
+        actor: `mcp-token:${token.id}`,
+        token_id: token.id,
+        action: 'log_freestyle_workout',
+        details: { date: '2026-09-04', name: 'Hotel gym', workout_id: r.workout.id, sets_done: 3, volume: 450 }
+      }])
+    })
+  })
+
+  test('normalizes omitted targets from set shape for reps time and cardio entries', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 30,
+        entries: [
+          { exercise_id: '0426', sets: [{ w: 22.5, r: 12 }, { w: 20, r: 10 }] },
+          { exercise_id: '1323', sets: [{ sec: 75, w: 0 }] },
+          { exercise_id: '3220', sets: [{ min: 18, speed: 9.5 }] }
+        ],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      const entries = readDiskState(dataDir).workouts[1].entries
+      expect(entries[0].target).toMatchObject({ id: '0426', mode: 'reps', sets: 2, reps: 12, weight: 22.5 })
+      expect(entries[1].target).toMatchObject({ id: '1323', mode: 'time', sets: 1, sec: 75, weight: 0 })
+      expect(entries[2].target).toMatchObject({ id: '3220', mode: 'cardio', sets: 1, min: 18, speed: 9.5 })
+    })
+  })
+
+  test('explicit freestyle target values override inferred set values', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 30,
+        entries: [
+          { exercise_id: '0426', target: { mode: 'reps', sets: 3, reps: 10, weight: 25 }, sets: [{ w: 25, r: 8 }] }
+        ],
+        expected_revision: 7,
+        dry_run: false
+      })
+
+      expect(readDiskState(dataDir).workouts[1].entries[0].target).toMatchObject({ id: '0426', mode: 'reps', sets: 3, reps: 10, weight: 25 })
+    })
+  })
+
+  test('accepts custom exercise ids and shows custom names in the summary', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: 'c_ring_row', sets: [{ w: 0, r: 12 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r.workout.entries[0]).toMatchObject({
+        id: 'c_ring_row',
+        name: 'Ring row',
+        mode: 'reps'
+      })
+      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+    })
+  })
+
+  test('rejects invalid freestyle workout names dates and exercises', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, () => {
+      expect(() => call('log_freestyle_workout', {
+        name: '   ',
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/name must be a non-empty string/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-02-30',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/date must be a valid YYYY-MM-DD date/)
+
+      expect(() => call('log_freestyle_workout', {
+        name: 42,
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/name must be a string/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: 'missing-ex', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unknown exercise id "missing-ex"/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [
+          { exercise_id: '0426', sets: [{ w: 20, r: 10 }] },
+          { exercise_id: '0426', sets: [{ w: 20, r: 8 }] }
+        ],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/duplicate workout entry for exercise "0426"/)
+    })
+  })
+
+  test('rejects invalid freestyle targets and mode-specific sets', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, () => {
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '1323', target: { mode: 'time', reps: 10 }, sets: [{ sec: 60, w: 0 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/reps is not valid for time mode/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', target: { mode: 'reps', inc: 2.5 }, sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unsupported freestyle target field "inc"/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', target: { mode: 'reps', prog: 'linear' }, sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unsupported freestyle target field "prog"/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', target: { mode: 'reps', policy: 'linear' }, sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/unsupported freestyle target field "policy"/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '3220', target: { mode: 'reps' }, sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/cardio exercise "3220" must use mode "cardio"/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '3220', target: { mode: 'cardio', reps: 10 }, sets: [{ min: 20, speed: 8 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/reps is not valid for cardio mode/)
+
+      expect(() => call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '1323', target: { mode: 'time' }, sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })).toThrow(/1323 set 1 must include integer sec >= 1/)
+    })
+  })
+
+  test('returns conflict without writing when freestyle revision is stale', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, ({ dataDir }) => {
+      const r = call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 6,
+        dry_run: false
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'STATE_CONFLICT',
+          message: 'State changed since the tool read it.',
+          current_revision: 7
+        }
+      })
+      expect(readDiskState(dataDir).workouts).toHaveLength(1)
+      expect(readDiskState(dataDir)._revision).toBe(7)
+      expect(readAuditEvents(dataDir)).toEqual([])
+    })
+  })
+
+  test('requires workout write scope for freestyle logging', () => {
+    withWriteToolEnv({ scopes: ['routine:write'], state: freestyleWorkoutWriteState() }, () => {
+      const r = call('log_freestyle_workout', {
+        date: '2026-09-04',
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r).toEqual({
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: 'workout:write'
+        }
+      })
+    })
+  })
+
+  test('defaults freestyle name and date', () => {
+    withWriteToolEnv({ scopes: ['workout:write'], state: freestyleWorkoutWriteState() }, () => {
+      const r = call('log_freestyle_workout', {
+        duration_min: 20,
+        entries: [{ exercise_id: '0426', sets: [{ w: 20, r: 10 }] }],
+        expected_revision: 7,
+        dry_run: true
+      })
+
+      expect(r.workout).toMatchObject({ date: FAKE_TODAY_ISO, routine_id: null, name: 'Freestyle' })
+    })
+  })
+})
+
 /* ---------- shared: no-state fallback ---------- */
 
 describe('shared: no-state fallback', () => {
@@ -2302,7 +2635,13 @@ describe('shared: no-state fallback', () => {
       edit_routine: { routine_id: 'routine', ops: [{ op: 'set_policy', policy: 'off' }], expected_revision: 0, dry_run: true },
       create_custom_exercise: { name: 'Ring support hold', body_part: CUSTOM_BODY_PART, expected_revision: 0, dry_run: true },
       add_bodyweight: { date: '2026-08-31', weight: 78.4, expected_revision: 0, dry_run: true },
-      log_workout: { routine_id: 'routine', duration_min: 60, entries: [{ exercise_id: 'exercise', sets: [{ w: 10, r: 10 }] }], expected_revision: 0, dry_run: true }
+      log_workout: { routine_id: 'routine', duration_min: 60, entries: [{ exercise_id: 'exercise', sets: [{ w: 10, r: 10 }] }], expected_revision: 0, dry_run: true },
+      log_freestyle_workout: {
+        duration_min: 30,
+        entries: [{ exercise_id: 'exercise', sets: [{ w: 10, r: 10 }] }],
+        expected_revision: 0,
+        dry_run: true
+      }
     }
     for (const t of TOOLS) {
       const r = t.handler(calls[t.name] || {})
