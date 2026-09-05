@@ -22,9 +22,10 @@ As of 2026-09-04:
 - Done: `edit_routine` supports structured patch ops with `routine:write`: `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise`, `reorder_exercise`, `link_superset` and `unlink_superset`.
 - Done: `add_bodyweight` adds or replaces one weigh-in with `bodyweight:write`, dry-run, revision checks and audit-backed commits.
 - Done: `log_workout` stores a completed workout for an existing routine from structured JSON with `workout:write`, dry-run, revision checks and audit-backed commits.
+- Done: `log_freestyle_workout` stores a completed freestyle workout with `routineId: null`, catalog/custom exercise ids, per-entry targets, `workout:write`, dry-run, revision checks and audit-backed commits.
 - Done: `create_custom_exercise` creates one custom exercise with `exercise:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: freestyle workout logging and deeper shared workout/set validation.
+- Not done: deeper shared workout/set validation.
 
 ## Current State
 
@@ -157,7 +158,7 @@ Recommended initial scopes:
 ```text
 schedule:write   override_day, assign_weekday
 routine:write    edit_routine
-workout:write    log_workout
+workout:write    log_workout, log_freestyle_workout
 bodyweight:write add_bodyweight
 ```
 
@@ -262,6 +263,7 @@ assign_weekday
 edit_routine
 add_bodyweight
 log_workout
+log_freestyle_workout
 ```
 
 `override_day`:
@@ -344,6 +346,30 @@ If the date already exists, the entry is replaced rather than duplicated. The st
 
 The tool rejects unknown routines, exercises outside the routine, duplicate exercise entries and invalid mode-specific set shapes. It stores entries in routine order, copies each routine target into the workout entry, forces supplied sets to `done: true`, computes `vol`, `prs` and `exWeights`, and records compact audit details without logging full state snapshots.
 
+`log_freestyle_workout` writes a finished workout that is not tied to a routine. Natural language parsing still stays in the LLM client; MCP receives structured JSON with concrete catalog or `customEx` exercise ids:
+
+```json
+{
+  "name": "Hotel gym",
+  "date": "2026-09-04",
+  "duration_min": 45,
+  "entries": [
+    {
+      "exercise_id": "0426",
+      "target": { "mode": "reps", "sets": 3, "reps": 10, "weight": 25 },
+      "sets": [
+        { "w": 25, "r": 10 },
+        { "w": 25, "r": 8 }
+      ]
+    }
+  ],
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+It stores `routineId: null`, defaults the name to `Freestyle`, preserves input entry order, accepts catalog or `customEx` exercise ids, normalizes per-entry targets from submitted sets plus explicit target overrides, forces supplied sets to `done: true`, computes `vol`, `prs` and `exWeights`, and records compact audit details without logging full set payloads. It does not do fuzzy matching, natural-language workout parsing, exercise creation or existing workout edits.
+
 ## Dry Run
 
 Every write tool should support `dry_run: true`.
@@ -410,6 +436,7 @@ Input validation examples:
 - weights, reps, sets, seconds and speeds must stay finite and within sane bounds;
 - operation list length should be capped.
 - `log_workout` entries must reference exercises inside the selected routine and match reps/time/cardio set shape.
+- `log_freestyle_workout` entries must reference catalog or `customEx` exercise ids and match reps/time/cardio set shape after target inference.
 
 Current state validation covers:
 
@@ -545,6 +572,7 @@ Do not split first just for neatness; split when it reduces real complexity.
 12. Done: Implement structured `log_workout` for existing routines.
 13. Done: Extend `edit_routine` with add/remove/reorder exercise ops.
 14. Done: Extend `edit_routine` with direct superset link/unlink ops.
+15. Done: Implement structured `log_freestyle_workout` for routine-less completed workouts.
 
 ## Testing Strategy
 
@@ -595,7 +623,8 @@ edit_routine
 add_bodyweight
 log_workout
 create_custom_exercise
-future: freestyle workout logging
+log_freestyle_workout
+future: deeper shared workout/set validation
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

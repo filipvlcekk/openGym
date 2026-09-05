@@ -540,6 +540,7 @@ Upstream roadmapa uvádí plánované operace:
 
 ```text
 log_workout
+log_freestyle_workout
 add_bodyweight
 edit_routine
 assign_weekday
@@ -553,6 +554,7 @@ edit_routine
 assign_weekday
 override_day
 log_workout
+log_freestyle_workout
 ```
 
 ---
@@ -737,7 +739,37 @@ První verze umí:
 - spočítat `vol`, `prs` a aktualizovat `exWeights`,
 - použít `workout:write`, `dry_run`, `expected_revision` a audit commit.
 
-Neumí zatím freestyle workout, fuzzy matching názvů cviků, přidání nového cviku ani editaci už existujícího workoutu.
+Neumí freestyle workout, fuzzy matching názvů cviků, přidání nového cviku ani editaci už existujícího workoutu; freestyle zápis řeší samostatný `log_freestyle_workout`.
+
+## 11.5.1 `log_freestyle_workout`
+
+Slouží pro zápis hotového freestyle workoutu, který není navázaný na existující rutinu.
+
+MCP payload je pořád strukturovaný. LLM musí dodat konkrétní `exercise_id`; pokud cvik neexistuje, nejdřív se vytvoří přes `create_custom_exercise`. MCP neparsuje přirozený jazyk a nedělá fuzzy matching názvů cviků.
+
+```json
+{
+  "name": "Hotel gym",
+  "date": "2026-09-04",
+  "duration_min": 45,
+  "entries": [
+    {
+      "exercise_id": "0426",
+      "target": { "mode": "reps", "sets": 3, "reps": 10, "weight": 25 },
+      "sets": [
+        { "w": 25, "r": 10 },
+        { "w": 25, "r": 8 }
+      ]
+    }
+  ],
+  "expected_revision": 184,
+  "dry_run": true
+}
+```
+
+Tool ukládá `routineId: null`, defaultní název `Freestyle`, zachová pořadí cviků z payloadu, přijímá katalogové i `customEx` cviky, normalizuje `target` pro každý cvik z dodaných setů a explicitních override hodnot, sety ukládá jako `done: true`, spočítá `vol`, `prs`, `exWeights` a používá stejný `workout:write`, dry-run, revision check a audit model jako `log_workout`.
+
+Neřeší fuzzy matching názvů, nevytváří cviky a needituje existující workouty.
 
 ---
 
@@ -2025,6 +2057,7 @@ assign_weekday
 edit_routine
 add_bodyweight
 log_workout
+log_freestyle_workout
 ```
 
 Detailní architektonický návrh Phase 2 je v samostatném dokumentu:
@@ -2049,9 +2082,10 @@ Stav k 2026-09-04:
 - hotovo: `edit_routine` pro `set_policy`, `set_exercise_target`, `add_exercise`, `remove_exercise`, `reorder_exercise`, `link_superset` a `unlink_superset` s `routine:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `add_bodyweight` pro přidání nebo nahrazení jednoho váhového záznamu s `bodyweight:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `log_workout` pro zapsání hotového workoutu podle existující rutiny se `workout:write`, dry-run, revision checkem a audit commitem,
+- hotovo: `log_freestyle_workout` pro zapsání hotového freestyle workoutu se `workout:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `create_custom_exercise` pro vytvoření jednoho vlastního cviku se `exercise:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
-- zbývá: freestyle workout logging a hlubší sdílená validace workout setů.
+- zbývá: hlubší sdílená validace workout setů.
 
 Současně:
 
@@ -2297,7 +2331,7 @@ openGym zůstává stejné.
 
 Ano, openGym lze velmi přirozeně propojit s AI agentem přes MCP.
 
-Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a šest scoped write toolů: `override_day`, `assign_weekday`, strukturovaný `edit_routine`, `create_custom_exercise`, `add_bodyweight` a `log_workout`.
+Upstream už poskytuje důležitou část infrastruktury: read-only MCP server s osmi nástroji a přímým použitím stejné training logiky jako frontend. Tento fork na tom staví, má dvanáct read-only toolů včetně `progression_next`, `exercise_history`, `training_summary` a `detect_stalls`, a sedm scoped write toolů: `override_day`, `assign_weekday`, strukturovaný `edit_routine`, `create_custom_exercise`, `add_bodyweight`, `log_workout` a `log_freestyle_workout`.
 
 Nejlepší cesta není vytvořit nový AI fitness tracker.
 

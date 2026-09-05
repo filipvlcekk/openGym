@@ -634,7 +634,7 @@ Expected: PASS.
 - Modify: `docs/openGym_AI_Coach_MCP_dokumentace.md`
 - Modify: `docs/superpowers/plans/2026-09-04-log-freestyle-workout-mcp.md`
 
-- [ ] **Step 1: Update MCP README tool docs**
+- [x] **Step 1: Update MCP README tool docs**
 
 In `mcp/README.md`, change the introductory write-tool count text from:
 
@@ -678,7 +678,7 @@ to:
 Remaining work: deeper shared workout/set validation.
 ```
 
-- [ ] **Step 2: Update architecture docs**
+- [x] **Step 2: Update architecture docs**
 
 In `docs/MCP_WRITE_ARCHITECTURE.md`, update the status list:
 
@@ -712,7 +712,7 @@ log_freestyle_workout
 future: deeper shared workout/set validation
 ```
 
-- [ ] **Step 3: Update Czech MCP docs**
+- [x] **Step 3: Update Czech MCP docs**
 
 In `docs/openGym_AI_Coach_MCP_dokumentace.md`, change the `log_workout` limitation sentence to:
 
@@ -768,39 +768,39 @@ Change the remaining status line to:
 
 Update the summary sentence from six to seven scoped write tools and include `log_freestyle_workout`.
 
-- [ ] **Step 4: Mark checklist progress**
+- [x] **Step 4: Mark checklist progress**
 
 Change completed plan items from `- [ ]` to `- [x]` as they are completed.
 
-- [ ] **Step 5: Run MCP suite**
+- [x] **Step 5: Run MCP suite**
 
 Run: `cd mcp && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Run MCP loadability check**
+- [x] **Step 6: Run MCP loadability check**
 
 Run: `cd mcp && npm run check:node-loadable`
 
 Expected: PASS.
 
-- [ ] **Step 7: Run API suite**
+- [x] **Step 7: Run API suite**
 
 Run: `cd api && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 8: Finalize README test counts**
+- [x] **Step 8: Finalize README test counts**
 
 After the final `cd mcp && npm test` output is known, update `mcp/README.md` test count text from the current values to the observed values. If `tools.test.js` reports 104 tests and total MCP reports 108 tests, write those exact numbers; otherwise use the actual observed output.
 
-- [ ] **Step 9: Check whitespace**
+- [x] **Step 9: Check whitespace**
 
 Run: `git diff --check`
 
 Expected: no output.
 
-- [ ] **Step 10: Check intended files before commit**
+- [x] **Step 10: Check intended files before commit**
 
 Run: `git status --short`
 
@@ -815,7 +815,7 @@ mcp/src/tools.js
 mcp/test/tools.test.js
 ```
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add mcp/src/tools.js mcp/test/tools.test.js mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md docs/superpowers/plans/2026-09-04-log-freestyle-workout-mcp.md
