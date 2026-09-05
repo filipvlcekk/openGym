@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `mcp/test/tools.test.js`
 
-- [ ] **Step 1: Add a freestyle fixture**
+- [x] **Step 1: Add a freestyle fixture**
 
 Add after `workoutWriteState()`:
 
@@ -41,7 +41,7 @@ function freestyleWorkoutWriteState() {
 }
 ```
 
-- [ ] **Step 2: Add dry-run preview test**
+- [x] **Step 2: Add dry-run preview test**
 
 Add a `describe('log_freestyle_workout', ...)` block after the existing `describe('log_workout', ...)` block:
 
@@ -87,7 +87,7 @@ test('previews a freestyle workout without writing or auditing', () => {
 })
 ```
 
-- [ ] **Step 3: Add commit test**
+- [x] **Step 3: Add commit test**
 
 Add:
 
@@ -150,7 +150,7 @@ test('commits a freestyle workout with routineId null and audit details', () => 
 })
 ```
 
-- [ ] **Step 4: Add omitted target normalization tests**
+- [x] **Step 4: Add omitted target normalization tests**
 
 Add one test that covers reps, time and cardio target inference:
 
@@ -197,7 +197,7 @@ test('explicit freestyle target values override inferred set values', () => {
 })
 ```
 
-- [ ] **Step 5: Add custom exercise test**
+- [x] **Step 5: Add custom exercise test**
 
 Add:
 
@@ -222,7 +222,7 @@ test('accepts custom exercise ids and shows custom names in the summary', () => 
 })
 ```
 
-- [ ] **Step 6: Add validation, conflict and auth tests**
+- [x] **Step 6: Add validation, conflict and auth tests**
 
 Add tests asserting:
 
@@ -321,7 +321,7 @@ test('defaults freestyle name and date', () => {
 })
 ```
 
-- [ ] **Step 7: Update the no-state registry smoke test**
+- [x] **Step 7: Update the no-state registry smoke test**
 
 Add the minimum schema payload to the existing `calls` object:
 
@@ -334,7 +334,7 @@ log_freestyle_workout: {
 }
 ```
 
-- [ ] **Step 8: Run tests to verify RED**
+- [x] **Step 8: Run tests to verify RED**
 
 Run: `cd mcp && npm test -- tools.test.js`
 
