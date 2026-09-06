@@ -12,6 +12,10 @@ function addIssue(issues, path, message) {
   issues.push({ path, message });
 }
 
+function joinPath(base, key) {
+  return /^[a-zA-Z0-9_-]+$/.test(key) ? `${base}.${key}` : `${base}[${JSON.stringify(key)}]`;
+}
+
 function isNonEmptyString(value) {
   return typeof value === 'string' && !!value.trim();
 }
@@ -46,7 +50,7 @@ function validateOptionalNonNegativeNumber(value, issues, path) {
   return true;
 }
 
-function validateOptionalPositiveNumber(value, issues, path) {
+function validateOptionalNullablePositiveNumber(value, issues, path) {
   if (value === undefined || value === null) return false;
   if (!isFiniteNumber(value) || value <= 0) {
     addIssue(issues, path, 'must be a positive finite number');
@@ -287,7 +291,7 @@ function validateWorkouts(state, issues) {
     if (hasFiniteStart && hasFiniteEnd && workout.end < workout.start) {
       addIssue(issues, `${path}.end`, 'must be >= start');
     }
-    validateOptionalPositiveNumber(workout.bw, issues, `${path}.bw`);
+    validateOptionalNullablePositiveNumber(workout.bw, issues, `${path}.bw`);
     validateOptionalNonNegativeNumber(workout.vol, issues, `${path}.vol`);
 
     if (workout.prs !== undefined) {
@@ -323,7 +327,7 @@ function validateExWeights(state, issues) {
   }
 
   for (const [exerciseId, record] of Object.entries(exWeights)) {
-    const path = `exWeights.${exerciseId}`;
+    const path = joinPath('exWeights', exerciseId);
     if (!isObject(record)) {
       addIssue(issues, path, 'must be an object');
       continue;
