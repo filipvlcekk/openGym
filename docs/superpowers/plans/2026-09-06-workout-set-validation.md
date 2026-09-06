@@ -656,7 +656,7 @@ git commit -m "feat: validate workout state shape"
 - Modify: `docs/superpowers/plans/2026-09-06-workout-set-validation.md`
 - Optional modify: `mcp/README.md` only if test counts or roadmap text become stale.
 
-- [ ] **Step 1: Update architecture validation section**
+- [x] **Step 1: Update architecture validation section**
 
 In `docs/MCP_WRITE_ARCHITECTURE.md`, update the validation section from:
 
@@ -686,7 +686,7 @@ Also update implementation status:
 
 Remove any line that says deeper shared workout/set validation is still not done.
 
-- [ ] **Step 2: Update Czech roadmap docs**
+- [x] **Step 2: Update Czech roadmap docs**
 
 In `docs/openGym_AI_Coach_MCP_dokumentace.md`, update the Phase 2 status so it includes:
 
@@ -708,7 +708,7 @@ to either remove it or replace it with:
 
 Keep wording factual and avoid claiming that all possible validation/migration work is complete.
 
-- [ ] **Step 3: Update README roadmap only if needed**
+- [x] **Step 3: Update README roadmap only if needed**
 
 Check `mcp/README.md`.
 
@@ -726,11 +726,11 @@ The current stdio Phase 2 write-tool roadmap is implemented; future hardening ca
 
 Do not change MCP test counts unless the MCP suite output changed.
 
-- [ ] **Step 4: Mark checklist progress**
+- [x] **Step 4: Mark checklist progress**
 
 Update this plan file as steps are completed. Do not mark verification steps complete until the exact command has been run.
 
-- [ ] **Step 5: Run full API suite**
+- [x] **Step 5: Run full API suite**
 
 Run:
 
@@ -740,7 +740,7 @@ cd api && npm test
 
 Expected: pass.
 
-- [ ] **Step 6: Run full MCP suite**
+- [x] **Step 6: Run full MCP suite**
 
 Run:
 
@@ -750,7 +750,7 @@ cd mcp && npm test
 
 Expected: pass.
 
-- [ ] **Step 7: Run MCP loadability check**
+- [x] **Step 7: Run MCP loadability check**
 
 Run:
 
@@ -760,7 +760,7 @@ cd mcp && npm run check:node-loadable
 
 Expected: pass.
 
-- [ ] **Step 8: Check whitespace and intended files**
+- [x] **Step 8: Check whitespace and intended files**
 
 Run:
 

@@ -146,8 +146,10 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
   routine policy, existing exercise targets, add/remove/reorder exercise changes and direct
   superset linking/unlinking,
   `add_bodyweight`, structured `log_workout`, `log_freestyle_workout`,
-  `create_custom_exercise`, and shared structural state validation before committed writes.
-  Remaining work: deeper shared workout/set validation.
+  `create_custom_exercise`, shared structural state validation, and deeper workout/set state
+  validation before committed writes.
+  The current stdio Phase 2 write-tool roadmap is implemented; future hardening can add optional
+  migration/audit tooling.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.
 - **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same

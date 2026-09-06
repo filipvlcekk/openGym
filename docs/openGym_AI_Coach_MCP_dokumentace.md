@@ -2069,7 +2069,7 @@ docs/MCP_WRITE_ARCHITECTURE.md
 
 Základní rozhodnutí: nejdřív vytvořit sdílenou `updateUserState(uid, mutation, options)` vrstvu s per-user lockem, revision konflikty, atomickým zápisem a audit logem. Až nad ní stavět jednotlivé write tooly.
 
-Stav k 2026-09-04:
+Stav k 2026-09-06:
 
 - hotovo: `api/state-service.js`,
 - hotovo: `_revision` + per-user lock v `updateUserState`,
@@ -2086,7 +2086,8 @@ Stav k 2026-09-04:
 - hotovo: `log_freestyle_workout` pro zapsání hotového freestyle workoutu se `workout:write`, dry-run, revision checkem a audit commitem,
 - hotovo: `create_custom_exercise` pro vytvoření jednoho vlastního cviku se `exercise:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
-- zbývá: hlubší sdílená validace workout setů.
+- hotovo: hlubší sdílená validace workout/set dat pro metadata workoutů, entries, sety, targety a `exWeights`, bez striktní migrace historických dat,
+- zbývá: žádný další stdio write tool v aktuální Phase 2 roadmapě; další větší etapa je remote HTTP MCP.
 
 Současně:
 

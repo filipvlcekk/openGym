@@ -8,7 +8,7 @@ The design goal is simple: every write must be authenticated, scoped, validated,
 
 ## Implementation Status
 
-As of 2026-09-04:
+As of 2026-09-06:
 
 - Done: `api/state-service.js` owns API state reads and full-state replacement.
 - Done: `updateUserState(uid, mutation, options)` supports per-user locks, `_revision` increments and optional `expectedRevision` conflict checks.
@@ -25,7 +25,7 @@ As of 2026-09-04:
 - Done: `log_freestyle_workout` stores a completed freestyle workout with `routineId: null`, catalog/custom exercise ids, per-entry targets, `workout:write`, dry-run, revision checks and audit-backed commits.
 - Done: `create_custom_exercise` creates one custom exercise with `exercise:write`, dry-run, revision checks and audit-backed commits.
 - Done: `api/state-validation.js` rejects invalid shared state shape before writes are committed or audited.
-- Not done: deeper shared workout/set validation.
+- Done: deeper shared workout/set validation guards persisted workout metadata, entries, sets, targets and `exWeights` without requiring a strict historical migration.
 
 ## Current State
 
@@ -448,10 +448,12 @@ Current state validation covers:
 - `dayPlan` values are existing routine ids or `rest`;
 - `dayPlan` and bodyweight dates are exact `YYYY-MM-DD`;
 - bodyweight entries use unique dates and positive finite weights;
-- `workouts` is an array with basic date and entries-array shape;
+- `workouts` is an array with conservative present-field checks for workout metadata, entries, sets and targets;
+- set numbers such as `w`, `r`, `sec`, `min`, `speed`, `rir` and `rpe` must be finite and within safe non-negative bounds;
+- `exWeights`, when present, has a guarded `{ exerciseId: { w, d } }` shape;
 - no `active` workout is persisted from write tools.
 
-Deeper set-level workout validation is intentionally future work so existing imported history is not rejected prematurely.
+This remains a compatibility guardrail, not a strict migration. Shared validation still allows historical workouts without targets, deleted exercise ids, deleted routine ids and imported zero-valued sets.
 
 ## Audit Log
 
