@@ -28,10 +28,10 @@ Key constraints:
 Planned create/modify set:
 
 - Modify `api/token-service.js`: add `state:read` to `TOKEN_SCOPES`.
-- Modify `api/test/state-service.test.js` or create `api/test/token-service.test.js`: cover `state:read` token creation/verification.
+- Modify `api/test/token-service.test.js`: cover `state:read` token creation/verification.
 - Modify `mcp/src/state.js`: add explicit `getStateForUid(uid, options)` and `getUserForUid(uid, options)` helpers while preserving current stdio global `getState()`/`getUser()`.
-- Modify `mcp/src/write-auth.js`: allow explicit bearer token/dataDir paths and/or pre-verified context without falling back to env for HTTP.
-- Modify `mcp/src/tools.js`: allow handlers to accept optional `context`; use context-aware state/auth when present.
+- Modify `mcp/src/write-auth.js`: allow explicit bearer token/dataDir paths and keep env fallback only for stdio.
+- Modify `mcp/src/tools.js`: allow handlers to accept optional verified `context`; use context-aware state/auth/dataDir when present.
 - Create `mcp/src/tool-scopes.js`: map tool names to read/write scope requirements.
 - Create `mcp/src/http-auth.js`: parse `Authorization`, verify tokens, map auth failures to HTTP/JSON-RPC errors.
 - Create `mcp/src/rate-limit.js`: simple in-memory token/IP buckets.
@@ -206,17 +206,15 @@ git commit -m "chore: document remote mcp transport strategy"
 
 **Files:**
 - Modify: `api/token-service.js`
-- Modify: `api/test/state-service.test.js` or Create: `api/test/token-service.test.js`
+- Modify: `api/test/token-service.test.js`
 
 - [ ] **Step 1: Add failing token scope test**
 
-Add a test proving `state:read` is accepted:
+Add a test proving `state:read` is accepted, following the existing `withTempTokenService()` helper style:
 
 ```js
 test('createToken accepts remote MCP read scope', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-token-service-'));
-  try {
-    const tokens = createTokenService({ dataDir });
+  withTempTokenService(tokens => {
     const created = tokens.createToken({
       uid: 'u1',
       name: 'Remote MCP',
@@ -233,9 +231,7 @@ test('createToken accepts remote MCP read scope', () => {
         scopes: ['state:read']
       }
     });
-  } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
+  });
 });
 ```
 
@@ -274,7 +270,7 @@ Expected: pass.
 - [ ] **Step 5: Commit scope**
 
 ```bash
-git add api/token-service.js api/test/state-service.test.js api/test/token-service.test.js
+git add api/token-service.js api/test/token-service.test.js
 git commit -m "feat: add remote mcp read scope"
 ```
 
@@ -574,6 +570,7 @@ test('read tools use request context uid when provided', () => {
     const result = call('list_routines', {}, {
       transport: 'http',
       dataDir,
+      auth: { verified: true },
       token: { id: 'tok_a', uid: 'user-a', name: 'A token', scopes: ['state:read'] }
     });
 
@@ -590,7 +587,7 @@ Update local `call()` helper to pass optional context to handlers.
 
 - [ ] **Step 2: Add failing HTTP-context write identity test**
 
-Add a test that creates two users, sets `OPENGYM_UID` to user B, creates a token for user A with `schedule:write`, and calls `override_day` with HTTP context/token.
+Add a test that creates two users, sets `OPENGYM_UID` and `OPENGYM_DATA` to user B's data directory, creates a token for user A in a separate HTTP `dataDir` with `schedule:write`, and calls `override_day` with an HTTP context representing that verified token.
 
 Expected assertions:
 
@@ -598,6 +595,7 @@ Expected assertions:
 - `state-user-b.json` unchanged;
 - audit event `uid` is `user-a`;
 - audit event `token_id` is user A token id.
+- no file in the env `OPENGYM_DATA` directory changed.
 
 - [ ] **Step 3: Run targeted tests to verify RED**
 
@@ -620,20 +618,33 @@ import { getState, getUser, getStateForUid, getUserForUid } from './state.js'
 Add:
 
 ```js
+function isVerifiedHttpContext(context) {
+  return context?.transport === 'http' && context?.auth?.verified === true && context?.token?.uid;
+}
+
 function stateForContext(context) {
-  return context?.token?.uid
+  return isVerifiedHttpContext(context)
     ? getStateForUid(context.token.uid, { dataDir: context.dataDir })
     : getState();
 }
 
 function userForContext(context) {
-  return context?.token?.uid
+  return isVerifiedHttpContext(context)
     ? getUserForUid(context.token.uid, { dataDir: context.dataDir })
     : getUser();
 }
 
 function writeAuthForContext(requiredScope, context) {
-  if (context?.token) {
+  if (context?.transport === 'http') {
+    if (!isVerifiedHttpContext(context)) {
+      return {
+        ok: false,
+        error: {
+          code: 'TOKEN_INVALID',
+          message: 'HTTP tool context must contain a verified token.'
+        }
+      };
+    }
     if (!context.token.scopes.includes(requiredScope)) {
       return {
         ok: false,
@@ -647,6 +658,12 @@ function writeAuthForContext(requiredScope, context) {
     return { ok: true, token: context.token };
   }
   return verifyMcpWriteToken({ requiredScope });
+}
+
+function dataDirForContext(context) {
+  return isVerifiedHttpContext(context)
+    ? context.dataDir
+    : process.env.OPENGYM_DATA;
 }
 ```
 
@@ -676,6 +693,22 @@ with:
 writeAuthForContext('schedule:write', context)
 ```
 
+Also replace write service setup:
+
+```js
+const dataDir = process.env.OPENGYM_DATA
+const states = writeStateServices(dataDir)
+```
+
+with:
+
+```js
+const dataDir = dataDirForContext(context)
+const states = writeStateServices(dataDir)
+```
+
+This is mandatory for HTTP: the same process may serve multiple data dirs in tests, and production HTTP must never write to a path selected by env when a verified request context provided a different `dataDir`.
+
 Each handler should become:
 
 ```js
@@ -684,7 +717,7 @@ handler: (params, context) => {
 }
 ```
 
-Existing stdio tests pass no context and keep old env-token behavior.
+Existing stdio tests pass no context and keep old env-token behavior. HTTP server code must construct context only from `authenticateHttpRequest()`. Tests may use a `verifiedHttpContext()` helper to avoid duplicating auth setup, but that helper must set `auth: { verified: true }` explicitly.
 
 - [ ] **Step 5: Run MCP tests**
 
@@ -719,7 +752,7 @@ Create tests for:
 - non-Bearer Authorization -> `401`, code `MCP_AUTH_REQUIRED`;
 - invalid token -> `401`, code `TOKEN_INVALID`;
 - revoked token -> `401`, code `TOKEN_REVOKED`;
-- valid token returns request context with `token.id`, `token.uid`, `scopes`, `dataDir`.
+- valid token returns request context with `auth.verified`, `token.id`, `token.uid`, `scopes`, `dataDir`.
 
 - [ ] **Step 2: Run tests to verify RED**
 
@@ -764,6 +797,7 @@ export function authenticateHttpRequest(headers, options = {}) {
     context: {
       transport: 'http',
       dataDir,
+      auth: { verified: true },
       token: verified.token
     }
   };
@@ -971,7 +1005,11 @@ Test:
 - `POST /mcp` without auth returns `401`;
 - invalid origin returns `403`;
 - missing `MCP-Protocol-Version` returns `400`;
-- mismatched `Mcp-Method` returns `400`;
+- missing `params._meta` returns `400` with JSON-RPC `error.code === -32020`;
+- missing `params._meta['io.modelcontextprotocol/protocolVersion']` returns `400` with JSON-RPC `error.code === -32020`;
+- unsupported protocol version returns `400` with JSON-RPC `error.code === -32020`;
+- mismatched `Mcp-Method` returns `400` with JSON-RPC `error.code === -32020`;
+- missing or mismatched `Mcp-Name` for `tools/call` returns `400` with JSON-RPC `error.code === -32020`;
 - unknown JSON-RPC method returns HTTP `404` with JSON-RPC `-32601`.
 
 - [ ] **Step 3: Add failing tool tests**
@@ -990,8 +1028,8 @@ Test:
 
 Configure low limits through server options and assert:
 
-- first request succeeds;
-- second over-limit request returns `429`;
+- repeated missing or invalid auth from the same IP returns `429`;
+- authenticated token requests over the token limit return `429`;
 - `Retry-After` header exists.
 
 - [ ] **Step 5: Run HTTP tests to verify RED**
@@ -1042,14 +1080,21 @@ function sendJson(res, status, body, headers = {}) {
 }
 ```
 
-Use stable `error.data.code` values such as `MCP_AUTH_REQUIRED`, `TOKEN_INVALID`, `TOKEN_FORBIDDEN`, `MCP_HEADER_MISMATCH`, `MCP_METHOD_NOT_FOUND`, `MCP_RATE_LIMITED`.
+Use required JSON-RPC numeric codes plus stable `error.data.code` values:
+
+- header validation failures: `error.code === -32020`, `error.data.code === 'MCP_HEADER_MISMATCH'` or a more precise local header code;
+- unknown methods: `error.code === -32601`, `error.data.code === 'MCP_METHOD_NOT_FOUND'`;
+- auth/scope/rate failures: use suitable transport JSON-RPC codes with local `error.data.code` values such as `MCP_AUTH_REQUIRED`, `TOKEN_INVALID`, `TOKEN_FORBIDDEN`, `MCP_RATE_LIMITED`.
 
 - [ ] **Step 3: Implement header validation**
 
 For target `2026-07-28`:
 
 - require `MCP-Protocol-Version`;
-- compare it to request `_meta['io.modelcontextprotocol/protocolVersion']` if present;
+- require request `params._meta`;
+- require `params._meta['io.modelcontextprotocol/protocolVersion']`;
+- support only the protocol version selected in the SDK spike, expected first target `2026-07-28`;
+- compare `MCP-Protocol-Version` to `params._meta['io.modelcontextprotocol/protocolVersion']`;
 - require `Mcp-Method` and compare to body `method`;
 - for `tools/call`, require `Mcp-Name` and compare to `params.name`.
 
@@ -1059,7 +1104,7 @@ Tests should pin behavior. If the SDK path handles headers itself, keep tests at
 
 For minimal adapter:
 
-- `tools/list`: return tool names/descriptions/input schemas from `TOOLS`;
+- `tools/list`: return tool names/descriptions/input schemas from `TOOLS` plus required 2026-07-28 cache/result metadata, for example `resultType`, `ttlMs` and `cacheScope` if the SDK does not supply them;
 - `tools/call`: lookup tool by `params.name`, require scope, call `handler(params.arguments || {}, context)`;
 - unknown method: HTTP `404`, JSON-RPC `-32601`;
 - unknown tool: JSON-RPC tool error or `404` depending SDK-compatible behavior chosen in spike.
@@ -1073,10 +1118,11 @@ Order:
 1. origin check;
 2. body size/parse/protocol check;
 3. authenticate token;
-4. coarse token rate limit;
-5. method/tool scope check;
-6. read/write rate limit bucket;
-7. dispatch.
+4. before returning any missing/invalid/revoked-token auth failure, increment/check failed-auth-by-IP limiter and return `429` with `Retry-After` if exhausted;
+5. after successful auth, apply coarse token rate limit;
+6. method/tool scope check;
+7. read/write rate limit bucket;
+8. dispatch.
 
 Do not log raw tokens or request bodies.
 
@@ -1200,7 +1246,7 @@ Run:
 docker compose config
 ```
 
-Expected: config renders and includes `mcp-http` only under profile. If Docker is unavailable, document that verification could not be run.
+Expected: config renders, includes `mcp-http` with `profiles: ["mcp-http"]`, and keeps the default published bind on `127.0.0.1`. If Docker is unavailable, document that verification could not be run.
 
 - [ ] **Step 4: Build optional image if Docker is available**
 
@@ -1215,7 +1261,9 @@ Expected: build succeeds. If dependency install needs network and fails in sandb
 - [ ] **Step 5: Commit container config**
 
 ```bash
-git add mcp/Dockerfile docker-compose.yml .dockerignore
+git add mcp/Dockerfile docker-compose.yml
+# Add .dockerignore only if the task created or modified it:
+# git add .dockerignore
 git commit -m "feat: add optional remote mcp container"
 ```
 
@@ -1225,7 +1273,7 @@ git commit -m "feat: add optional remote mcp container"
 - Modify: `mcp/README.md`
 - Modify: `docs/MCP_WRITE_ARCHITECTURE.md`
 - Modify: `docs/openGym_AI_Coach_MCP_dokumentace.md`
-- Modify: `.env.example` if present
+- Modify: `.env.example` only if present
 - Modify: `README.md` only if the root deployment section should mention the optional profile.
 
 - [ ] **Step 1: Document env vars**
@@ -1279,7 +1327,9 @@ Expected: no active roadmap stale text.
 - [ ] **Step 6: Commit docs**
 
 ```bash
-git add README.md mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md .env.example
+git add README.md mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md
+# Add .env.example only if it exists and was changed:
+# git add .env.example
 git commit -m "docs: document remote mcp deployment"
 ```
 
@@ -1340,6 +1390,31 @@ cd mcp && OPENGYM_DATA=../data MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=3010 node s
 ```
 
 Then call `/healthz` and one authenticated `/mcp` `tools/list` or `tools/call` request with a test token.
+
+The `/mcp` smoke request must include compliant headers and matching body metadata. Example shape:
+
+```bash
+curl -sS http://127.0.0.1:3010/mcp \
+  -H "Authorization: Bearer $OPENGYM_MCP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {
+      "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {
+          "name": "opengym-smoke",
+          "version": "0.1.0"
+        }
+      }
+    }
+  }'
+```
 
 Expected: health ok, authenticated MCP response ok, no token appears in logs.
 

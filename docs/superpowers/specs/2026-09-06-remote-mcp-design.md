@@ -65,6 +65,9 @@ For the 2026-07-28 protocol revision:
 - protocol-level sessions and `Mcp-Session-Id` are removed;
 - requests carry protocol/client metadata in `_meta`;
 - HTTP headers such as `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` are used for routing/inspection;
+- every HTTP request must carry request metadata at `params._meta['io.modelcontextprotocol/protocolVersion']`, and it must match `MCP-Protocol-Version`;
+- header validation failures must use the MCP header-validation JSON-RPC error code, while unknown methods use the standard method-not-found code;
+- list responses such as `tools/list` must include the current cache/result metadata required by the target protocol revision;
 - servers must validate `Origin` when present to reduce DNS rebinding risk.
 
 Do not implement the deprecated HTTP+SSE transport in the first Remote MCP milestone unless a real target client requires it.
@@ -138,6 +141,7 @@ Rules:
 - revocation uses the existing token management API and takes effect on the next request;
 - `last_used_at` continues to update through token verification;
 - the verified token's `uid`, `id` and `scopes` are carried in a request context for the tool call;
+- the request context marks the identity as verified by the HTTP auth layer;
 - remote reads must load `state-<token.uid>.json`, not the process-wide `OPENGYM_UID` state;
 - remote writes must verify the HTTP bearer token and pass that token identity into the existing write path, not fall back to `process.env.OPENGYM_MCP_TOKEN`.
 
@@ -195,6 +199,7 @@ The implementation should introduce a narrow execution context such as:
 {
   transport: 'http',
   dataDir,
+  auth: { verified: true },
   token: {
     id,
     uid,
@@ -267,14 +272,16 @@ The HTTP server should reject:
 - revoked token;
 - request body that is not a JSON-RPC object;
 - missing `MCP-Protocol-Version` when targeting MCP 2026-07-28;
-- `MCP-Protocol-Version` that does not match request `_meta`;
+- missing request `params._meta['io.modelcontextprotocol/protocolVersion']`;
+- unsupported protocol versions;
+- `MCP-Protocol-Version` that does not match request `params._meta['io.modelcontextprotocol/protocolVersion']`;
 - missing or mismatched `Mcp-Method`;
 - missing or mismatched `Mcp-Name` for named operations such as `tools/call`;
 - unsupported JSON-RPC method with HTTP `404` and JSON-RPC `-32601`;
 - invalid `Origin` when an `Origin` header is present;
 - deprecated session-only transport requests such as `GET /mcp` or `Mcp-Session-Id`-dependent behavior.
 
-For the first 2026-07-28 target, protocol headers are required. Do not make that conditional in production code. The SDK spike can refine exact header validation mechanics, but the final implementation must have explicit tests for header/body mismatches and unknown methods.
+For the first 2026-07-28 target, protocol headers and matching body metadata are required. Do not make that conditional in production code. The SDK spike can refine exact header validation mechanics, but the final implementation must have explicit tests for missing metadata, header/body mismatches and unknown methods.
 
 ## Origin Policy
 
