@@ -21,6 +21,8 @@ The validator should catch obvious state corruption before API or MCP writes are
 
 It does not validate workout ids, timestamps, `routineId`, names, bodyweight-at-workout, volume, PR ids, entry objects, set objects, target shape or mode-specific set fields.
 
+It also does not validate the top-level `exWeights` cache beyond whatever individual writers produce. That cache is derived from workout history, but malformed values can still break workout setup and read paths.
+
 MCP write tools already do stricter input validation for newly logged workouts. `log_workout` and `log_freestyle_workout` normalize submitted sets, force them to `done: true`, compute `vol`, `prs` and `exWeights`, and write through the shared state service. That tool-level validation is still needed because it protects the public MCP payload contract.
 
 ## Recommended Approach
@@ -100,10 +102,12 @@ For each `entry.sets[*]`:
 - `sec`, if present, must be a finite number greater than or equal to `0`.
 - `min`, if present, must be a finite number greater than or equal to `0`.
 - `speed`, if present, must be a finite number greater than or equal to `0`.
-- `rir`, if present, must be a finite number greater than or equal to `0`.
-- `rpe`, if present, must be a finite number greater than or equal to `0`.
+- `rir`, if present, must be a finite number from `0` to `10`.
+- `rpe`, if present, must be a finite number from `0` to `10`.
 
 Do not require reps to be integers in shared validation. The current MCP write tools require integer reps for new writes, but shared validation should tolerate older or imported state until there is a dedicated migration path.
+
+Do not enforce the UI's current RPE lower display floor of `6` in shared validation. `0` remains tolerated as a conservative legacy/import value, but values over `10` are corrupt because effort summaries convert RPE through `10 - rpe`.
 
 Do not require a set to contain a mode-specific field. Missing `w`, `r`, `sec`, `min` or `speed` should remain valid; wrong types or negative values should not.
 
@@ -132,6 +136,17 @@ For each `entry.target`, when present:
 Shared validation should not reject unknown target keys. This is a state guardrail, not a closed schema for all future frontend fields. MCP tool payload schemas can stay strict at the edge.
 
 Shared validation should not reject mode-incompatible target fields. That remains the responsibility of write-tool input validation. Historical entries may have incomplete or unusual target data, and read helpers already use forgiving fallback behavior.
+
+## ExWeights Validation Contract
+
+The top-level `exWeights` cache should remain optional. When present:
+
+- `exWeights` must be an object.
+- each value must be an object.
+- each record's `w`, if present, must be a finite number greater than or equal to `0`.
+- each record's `d`, if present, must be a valid calendar date in exact `YYYY-MM-DD` form.
+
+Shared validation should not require `exWeights` keys to match routines, catalog exercises, custom exercises or workout history. It should also not recompute `exWeights` from workouts. This is a shape guard for a cache, not an integrity audit.
 
 ## Error Reporting
 
@@ -171,6 +186,7 @@ The tests should cover:
 - invalid entry/set object shape fails without writing;
 - invalid set numeric fields fail without writing or audit;
 - invalid target metadata fails without writing;
+- invalid `exWeights` shape fails without writing;
 - `active` continues to be stripped before validation.
 
 Keep MCP write-tool tests focused on MCP payload behavior. Add MCP tests only if the shared validator exposes a regression in commit behavior that API tests cannot observe.
