@@ -354,7 +354,7 @@ git commit -m "test: add workout set state validation contract"
 **Files:**
 - Modify: `api/state-validation.js`
 
-- [ ] **Step 1: Add primitive validation helpers**
+- [x] **Step 1: Add primitive validation helpers**
 
 Add after `addIssue()`:
 
@@ -413,7 +413,7 @@ function validateOptionalRangeNumber(value, issues, path, min, max) {
 
 If a helper would duplicate existing bodyweight logic poorly, keep the implementation simple and local. Do not import frontend/MCP helpers.
 
-- [ ] **Step 2: Add target validation helpers**
+- [x] **Step 2: Add target validation helpers**
 
 Add before `validateWorkouts()`:
 
@@ -461,7 +461,7 @@ function validateWorkoutTarget(target, issues, path) {
 
 Do not reject unknown target keys.
 
-- [ ] **Step 3: Add set validation helpers**
+- [x] **Step 3: Add set validation helpers**
 
 Add before `validateWorkoutEntry()`:
 
@@ -489,7 +489,7 @@ function validateWorkoutSet(set, issues, path) {
 
 Do not require any one mode-specific field to be present.
 
-- [ ] **Step 4: Add entry validation helper**
+- [x] **Step 4: Add entry validation helper**
 
 Add before `validateWorkouts()`:
 
@@ -520,7 +520,7 @@ function validateWorkoutEntry(entry, issues, path) {
 }
 ```
 
-- [ ] **Step 5: Expand `validateWorkouts()`**
+- [x] **Step 5: Expand `validateWorkouts()`**
 
 Replace the current per-workout body inside `validateWorkouts()` with:
 
@@ -576,7 +576,7 @@ Replace the current per-workout body inside `validateWorkouts()` with:
 
 Keep the existing early return when a workout itself is not an object.
 
-- [ ] **Step 6: Add `exWeights` validation**
+- [x] **Step 6: Add `exWeights` validation**
 
 Add before `export function validateState`:
 
@@ -609,7 +609,7 @@ Then call it in `validateState()` after `validateBodyweight(state, issues);` and
 validateExWeights(state, issues);
 ```
 
-- [ ] **Step 7: Run API tests**
+- [x] **Step 7: Run API tests**
 
 Run:
 
@@ -619,7 +619,7 @@ cd api && npm test
 
 Expected: all API tests pass.
 
-- [ ] **Step 8: Run MCP tests**
+- [x] **Step 8: Run MCP tests**
 
 Run:
 
@@ -629,7 +629,7 @@ cd mcp && npm test
 
 Expected: all MCP tests pass. This proves `log_workout`, `log_freestyle_workout`, `add_bodyweight`, `edit_routine` and token flows still commit through the stricter shared validator.
 
-- [ ] **Step 9: Run MCP loadability check**
+- [x] **Step 9: Run MCP loadability check**
 
 Run:
 
@@ -639,7 +639,7 @@ cd mcp && npm run check:node-loadable
 
 Expected: pass.
 
-- [ ] **Step 10: Commit implementation**
+- [x] **Step 10: Commit implementation**
 
 ```bash
 git add api/state-validation.js
