@@ -298,6 +298,16 @@ beforeEach(() => {
 /* ---------- request context ---------- */
 
 describe('request context', () => {
+  test('read tools reject malformed HTTP contexts instead of falling back to stdio state', () => {
+    expect(call('list_routines', {}, { transport: 'http' })).toEqual({
+      ok: false,
+      error: {
+        code: 'TOKEN_INVALID',
+        message: 'HTTP tool context must contain a verified token.'
+      }
+    })
+  })
+
   test('read tools use request context uid when provided', () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-mcp-context-tools-'))
     const prevUid = process.env.OPENGYM_UID

@@ -4,7 +4,7 @@
 import { z } from 'zod'
 import { createAuditService } from '../../api/audit-service.js'
 import { createStateService } from '../../api/state-service.js'
-import { getState, getUser, getStateForUid, getUserForUid } from './state.js'
+import { getState, getStateForUid } from './state.js'
 import { verifyMcpWriteToken } from './write-auth.js'
 import {
   setLabel, exLine, muscleName, policyName, friendlyDuration, ratio, muscleOrder, fmt
@@ -1173,15 +1173,22 @@ function isVerifiedHttpContext(context) {
 }
 
 function stateForContext(context) {
+  if (context?.transport === 'http' && !isVerifiedHttpContext(context)) {
+    return {
+      ok: false,
+      error: {
+        code: 'TOKEN_INVALID',
+        message: 'HTTP tool context must contain a verified token.'
+      }
+    }
+  }
   return isVerifiedHttpContext(context)
     ? getStateForUid(context.token.uid, { dataDir: context.dataDir })
     : getState()
 }
 
-function userForContext(context) {
-  return isVerifiedHttpContext(context)
-    ? getUserForUid(context.token.uid, { dataDir: context.dataDir })
-    : getUser()
+function isToolError(value) {
+  return value?.ok === false && value?.error
 }
 
 function writeAuthForContext(requiredScope, context) {
@@ -1225,6 +1232,7 @@ export const listRoutines = {
   schema: {},
   handler: (_params, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     return {
       unit: S.unit || 'kg',
@@ -1247,6 +1255,7 @@ export const getRoutine = {
   schema: { routine_id: z.string().min(1) },
   handler: ({ routine_id }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const r = (S.routines || []).find(x => x.id === routine_id)
     if (!r) { const e = new Error(`no routine with id ${JSON.stringify(routine_id)}`); e.code = 'ENOENT'; throw e }
@@ -1290,6 +1299,7 @@ export const getWeekPlan = {
   schema: {},
   handler: (_params, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const today = new Date()
     const isoToday = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0')
@@ -1328,6 +1338,7 @@ export const listWorkouts = {
   },
   handler: ({ from, to, limit }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const lim = Math.min(Math.max(limit || 25, 1), 200)
     const all = (S.workouts || []).slice().sort((a, b) => (b.d || '').localeCompare(a.d || ''))
@@ -1378,6 +1389,7 @@ export const getWorkout = {
   },
   handler: ({ date, workout_id }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const workouts = S.workouts || []
     let w
@@ -1434,6 +1446,7 @@ export const exerciseHistory = {
   },
   handler: ({ exercise_id, limit }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const lim = Math.min(Math.max(limit || 10, 1), 100)
     const rows = (S.workouts || [])
@@ -1484,6 +1497,7 @@ export const trainingSummary = {
   },
   handler: ({ period }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const range = periodRange(period)
     const workouts = (S.workouts || []).filter(w => inDateRange(w.d, range))
@@ -1522,6 +1536,7 @@ export const detectStalls = {
   },
   handler: ({ window, routine_id }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const win = Math.min(Math.max(window || 4, 3), 8)
     const candidates = routinesToScan(S, routine_id)
@@ -1550,6 +1565,7 @@ export const getBodyweight = {
   },
   handler: ({ from, to }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const goal = S.targetW || null
     const bw = (S.bodyweight || []).filter(b => {
@@ -1582,6 +1598,7 @@ export const estimate1rm = {
   },
   handler: ({ exercise_id, formula }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const f = formula || DEFAULT_FORMULA
     if (exercise_id) {
@@ -1623,6 +1640,7 @@ export const muscleBalance = {
   },
   handler: ({ period }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const now = Date.now()
     const cutoff = period === 'week' ? now - 7 * 86400000
@@ -1653,6 +1671,7 @@ export const progressionNext = {
   },
   handler: ({ routine_id, exercise_id }, context) => {
     const S = stateForContext(context)
+    if (isToolError(S)) return S
     if (!S) return noState()
     const routine = (S.routines || []).find(r => r.id === routine_id)
     if (!routine) { const e = new Error(`no routine with id ${JSON.stringify(routine_id)}`); e.code = 'ENOENT'; throw e }
@@ -1719,6 +1738,7 @@ export const overrideDay = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const change = overrideDayChange(S, date, routine_id)
@@ -1801,6 +1821,7 @@ export const assignWeekday = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const change = assignWeekdayChange(S, weekday, routine_id)
@@ -1880,6 +1901,7 @@ export const editRoutine = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const revision = revisionOf(S)
@@ -1953,6 +1975,7 @@ export const createCustomExercise = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const preview = customExerciseChange(S, { name, body_part, description })
@@ -2015,6 +2038,7 @@ export const addBodyweight = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const change = bodyweightChange(S, date, weight)
@@ -2098,6 +2122,7 @@ export const logWorkout = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const workout = buildLoggedWorkout(S, { routine_id, date, duration_min, bodyweight, entries })
@@ -2168,6 +2193,7 @@ export const logFreestyleWorkout = {
     const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
     if (!S) return noState()
 
     const workout = buildFreestyleWorkout(S, { name, date, duration_min, bodyweight, entries })
