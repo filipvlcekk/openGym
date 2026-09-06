@@ -19,8 +19,20 @@ function readJsonOrNull(file) {
 
 function reloadDb() { _db = readJsonOrNull(path.join(DATA_DIR, 'db.json')) || { users: [], creds: [], subs: [], invites: [] } }
 
+function safeUid(uid) {
+  const value = String(uid || '').trim()
+  if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+    throw new Error(`uid contains characters that aren't safe in a filename: ${JSON.stringify(value)}`)
+  }
+  return value
+}
+
+function stateFileIn(dataDir, uid) {
+  return path.join(dataDir, 'state-' + safeUid(uid) + '.json')
+}
+
 function stateFile(uid) {
-  return path.join(DATA_DIR, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json')
+  return stateFileIn(DATA_DIR, uid)
 }
 
 // Pick the uid: OPENGYM_UID env, else the only state-* file, else the only user in db.json.
@@ -113,6 +125,21 @@ export function getUser() {
   init()
   const u = _db.users.find(x => x.id === _uid) || { id: _uid, name: 'Profile', created: null }
   return { id: u.id, name: u.name, created: u.created || null }
+}
+
+export function getStateForUid(uid, options = {}) {
+  const dir = options.dataDir || DATA_DIR
+  const state = readJsonOrNull(stateFileIn(dir, uid))
+  return state ? Object.assign({}, defaultsShape(), state) : null
+}
+
+export function getUserForUid(uid, options = {}) {
+  const dir = options.dataDir || DATA_DIR
+  const id = safeUid(uid)
+  const db = readJsonOrNull(path.join(dir, 'db.json')) || { users: [] }
+  const users = Array.isArray(db.users) ? db.users : []
+  const user = users.find(u => u.id === id) || { id, name: 'Profile', created: null }
+  return { id: user.id, name: user.name, created: user.created || null }
 }
 
 export const dataDir = () => DATA_DIR

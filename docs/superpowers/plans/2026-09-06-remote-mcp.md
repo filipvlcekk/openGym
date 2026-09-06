@@ -289,7 +289,7 @@ git commit -m "feat: add remote mcp read scope"
 - Modify: `mcp/src/state.js`
 - Create: `mcp/test/state-context.test.js`
 
-- [ ] **Step 1: Add failing multi-user state tests**
+- [x] **Step 1: Add failing multi-user state tests**
 
 Create `mcp/test/state-context.test.js` with fixtures:
 
@@ -340,7 +340,7 @@ describe('request-scoped state helpers', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -350,7 +350,7 @@ cd mcp && npm test -- state-context.test.js
 
 Expected: fails because `getStateForUid`/`getUserForUid` are not exported.
 
-- [ ] **Step 3: Implement explicit state helpers**
+- [x] **Step 3: Implement explicit state helpers**
 
 In `mcp/src/state.js`, add helpers that:
 
@@ -394,7 +394,7 @@ export function getUserForUid(uid, options = {}) {
 
 Deduplicate with existing `stateFile(uid)` carefully if it stays readable.
 
-- [ ] **Step 4: Run MCP tests**
+- [x] **Step 4: Run MCP tests**
 
 Run:
 
