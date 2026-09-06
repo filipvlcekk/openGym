@@ -577,6 +577,8 @@ Do not split first just for neatness; split when it reduces real complexity.
 13. Done: Extend `edit_routine` with add/remove/reorder exercise ops.
 14. Done: Extend `edit_routine` with direct superset link/unlink ops.
 15. Done: Implement structured `log_freestyle_workout` for routine-less completed workouts.
+16. Done: Implement `create_custom_exercise`.
+17. Done: Add deeper shared workout/set state validation.
 
 ## Testing Strategy
 
@@ -628,7 +630,8 @@ add_bodyweight
 log_workout
 create_custom_exercise
 log_freestyle_workout
-future: deeper shared workout/set validation
+deeper shared workout/set validation
+future: remote MCP over Streamable HTTP
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.

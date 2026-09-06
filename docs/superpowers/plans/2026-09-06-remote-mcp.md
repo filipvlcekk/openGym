@@ -59,7 +59,7 @@ Planned create/modify set:
 - Modify: `docs/MCP_WRITE_ARCHITECTURE.md`
 - Modify: `docs/superpowers/plans/2026-09-06-remote-mcp.md`
 
-- [ ] **Step 1: Locate stale Phase 2 recommendation text**
+- [x] **Step 1: Locate stale Phase 2 recommendation text**
 
 Run:
 
@@ -69,7 +69,7 @@ rg -n "future: deeper shared workout/set validation|deeper shared workout/set va
 
 Expected: only historical design/plan files should still mention the old future state. Active roadmap docs should not claim deeper workout/set validation is future work.
 
-- [ ] **Step 2: Update `docs/MCP_WRITE_ARCHITECTURE.md` implementation order**
+- [x] **Step 2: Update `docs/MCP_WRITE_ARCHITECTURE.md` implementation order**
 
 Change the bottom recommendation list from the stale text:
 
@@ -90,7 +90,7 @@ future: remote MCP over Streamable HTTP
 
 If the implementation-order numbered list is missing `create_custom_exercise` or deeper workout/set validation, add them as done items.
 
-- [ ] **Step 3: Run docs diff check**
+- [x] **Step 3: Run docs diff check**
 
 Run:
 
@@ -101,7 +101,7 @@ git diff -- docs/MCP_WRITE_ARCHITECTURE.md
 
 Expected: no whitespace errors; diff only updates stale roadmap wording.
 
-- [ ] **Step 4: Commit docs cleanup**
+- [x] **Step 4: Commit docs cleanup**
 
 ```bash
 git add docs/MCP_WRITE_ARCHITECTURE.md docs/superpowers/plans/2026-09-06-remote-mcp.md
