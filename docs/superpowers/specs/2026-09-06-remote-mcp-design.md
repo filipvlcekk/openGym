@@ -50,6 +50,8 @@ bodyweight:write
 
 Remote MCP changes the risk profile. A remote HTTP endpoint cannot leave read tools unauthenticated, because read tools expose training history, bodyweight and routines.
 
+Remote MCP also cannot use the current process-wide profile resolution for requests. Today read tools call global `getState()`/`getUser()`, which resolve one `_uid` from `OPENGYM_UID`, local state files or `db.json`. That is correct for one local stdio process, but it is unsafe for one HTTP process serving multiple bearer tokens. HTTP tool execution must bind every request to the verified token's `uid`.
+
 ## Protocol Baseline
 
 Target the current MCP Streamable HTTP shape rather than the older HTTP+SSE/session model.
@@ -134,7 +136,10 @@ Rules:
 - insufficient scopes return HTTP `403`;
 - token verification uses `api/token-service.js`;
 - revocation uses the existing token management API and takes effect on the next request;
-- `last_used_at` continues to update through token verification.
+- `last_used_at` continues to update through token verification;
+- the verified token's `uid`, `id` and `scopes` are carried in a request context for the tool call;
+- remote reads must load `state-<token.uid>.json`, not the process-wide `OPENGYM_UID` state;
+- remote writes must verify the HTTP bearer token and pass that token identity into the existing write path, not fall back to `process.env.OPENGYM_MCP_TOKEN`.
 
 ### OAuth Compatibility Boundary
 
@@ -178,6 +183,63 @@ Do not grant read access implicitly from write scopes in the first milestone. If
 
 This keeps the meaning of each scope obvious and audit-friendly.
 
+## Request-Scoped State And Tool Context
+
+Add request-scoped plumbing before exposing HTTP.
+
+Current stdio behavior may remain global because one stdio process serves one local client/profile. Remote HTTP behavior must not be global.
+
+The implementation should introduce a narrow execution context such as:
+
+```js
+{
+  transport: 'http',
+  dataDir,
+  token: {
+    id,
+    uid,
+    name,
+    scopes
+  }
+}
+```
+
+Read helpers need an explicit user path for HTTP:
+
+```text
+getStateForUid(uid, options)
+getUserForUid(uid, options)
+```
+
+or an equivalent context-aware helper. The important contract is that remote read tools load the profile selected by the verified bearer token, not by `OPENGYM_UID`, file-count heuristics or cached process state.
+
+Write auth also needs an explicit token path for HTTP. Existing write tools currently call `verifyMcpWriteToken({ requiredScope })`, which reads `OPENGYM_MCP_TOKEN` when no token is supplied. Remote wrappers must avoid that fallback by passing either:
+
+```js
+verifyMcpWriteToken({
+  dataDir,
+  token: bearerToken,
+  requiredScope
+})
+```
+
+or a pre-verified request identity into a shared write authorization helper.
+
+Audit details for HTTP writes must still use:
+
+```text
+actor: mcp-token:<token.id>
+tokenId: <token.id>
+uid: <token.uid>
+```
+
+Add tests for:
+
+- two users with two tokens reading different `state-<uid>.json` files from the same HTTP process;
+- an HTTP write using token A mutates only user A's state, even if `OPENGYM_UID` points at user B;
+- an HTTP write audit event contains token A's id;
+- a revoked token cannot read or write after revocation.
+
 ## HTTP Surface
 
 Expose:
@@ -204,9 +266,15 @@ The HTTP server should reject:
 - malformed bearer token;
 - revoked token;
 - request body that is not a JSON-RPC object;
-- unsupported JSON-RPC method;
+- missing `MCP-Protocol-Version` when targeting MCP 2026-07-28;
+- `MCP-Protocol-Version` that does not match request `_meta`;
+- missing or mismatched `Mcp-Method`;
+- missing or mismatched `Mcp-Name` for named operations such as `tools/call`;
+- unsupported JSON-RPC method with HTTP `404` and JSON-RPC `-32601`;
 - invalid `Origin` when an `Origin` header is present;
-- missing or incompatible protocol headers when the selected SDK/protocol mode requires them.
+- deprecated session-only transport requests such as `GET /mcp` or `Mcp-Session-Id`-dependent behavior.
+
+For the first 2026-07-28 target, protocol headers are required. Do not make that conditional in production code. The SDK spike can refine exact header validation mechanics, but the final implementation must have explicit tests for header/body mismatches and unknown methods.
 
 ## Origin Policy
 
@@ -283,7 +351,14 @@ Start it with:
 docker compose --profile mcp-http up -d
 ```
 
-Do not publish the port by default unless that proves too awkward for common reverse-proxy setups. A reverse proxy on the same Docker network can route to `mcp-http:3010`.
+Do not publish the port publicly by default.
+
+Support two deployment paths:
+
+1. Host-level reverse proxy: publish `mcp-http` on localhost only, for example `127.0.0.1:3010:3010`, and let Caddy/Traefik/nginx on the host terminate HTTPS and proxy to localhost.
+2. Docker-network reverse proxy: document how to attach `mcp-http` to an externally managed proxy network, or add labels in a later proxy-specific recipe. The default compose file does not currently define such a proxy service.
+
+The first implementation should include the localhost-only host port path because it works with the current compose topology.
 
 If a host port is useful for local testing, make it explicitly opt-in:
 
@@ -305,15 +380,22 @@ mcp/src/index.js           stdio entrypoint
 mcp/src/server.js          shared MCP server/tool registration factory
 mcp/src/http.js            HTTP entrypoint
 mcp/src/http-auth.js       Authorization header parsing and token/scope checks
+mcp/src/http-state.js      request-scoped state/user helpers for token uid
 mcp/src/rate-limit.js      small in-memory limiter helpers
 mcp/src/tool-scopes.js     mapping from tool names to required scopes
 mcp/test/http.test.js      HTTP transport/auth/rate tests
 mcp/Dockerfile             HTTP MCP container image
 ```
 
-`mcp/src/tools.js` should remain the source of truth for tool definitions and handlers.
+`mcp/src/tools.js` should remain the source of truth for tool definitions and handlers, but handlers may need to accept an optional context argument:
 
-The design should avoid changing tool handler behavior just to support HTTP. A tool should not need to know whether it was called by stdio or HTTP, except through the auth identity passed by the wrapper if needed.
+```js
+handler(params, context)
+```
+
+Existing tests and stdio calls can continue passing no context. HTTP calls must pass context. This keeps stdio compatible while making HTTP state selection explicit.
+
+The design should avoid changing business behavior just to support HTTP. A tool should not need to know transport details, but it does need access to request-scoped state/auth identity when called remotely.
 
 ## SDK Strategy
 
@@ -387,10 +469,16 @@ Contract tests:
 - `POST /mcp` without auth returns `401`;
 - invalid bearer returns `401`;
 - revoked token returns `401`;
+- missing `MCP-Protocol-Version` returns `400`;
+- mismatched `Mcp-Method`/body method returns `400`;
+- unknown JSON-RPC method returns HTTP `404` with JSON-RPC `-32601`;
 - valid token without `state:read` cannot call read tools;
 - valid token with `state:read` can call a read tool;
 - valid token without required write scope cannot call a write tool;
 - valid token with required write scope can dry-run a write tool;
+- two tokens for two users read isolated states from the same HTTP process;
+- HTTP writes use bearer token uid even when `OPENGYM_UID` is set differently;
+- HTTP write audit events include the bearer token id;
 - invalid `Origin` returns `403`;
 - allowed `Origin` succeeds;
 - rate limit returns `429` and `Retry-After`;
@@ -472,6 +560,12 @@ Remote MCP exposes sensitive training data if misconfigured.
 
 Mitigation: opt-in compose profile, no default public port, bearer auth on every request, origin validation, docs requiring HTTPS reverse proxy.
 
+### Cross-User State Confusion
+
+A single HTTP process may serve multiple user tokens while existing stdio helpers cache one process-wide profile.
+
+Mitigation: request-scoped token identity must select state for HTTP reads and writes. Add multi-user tests where `OPENGYM_UID` disagrees with the bearer token uid.
+
 ### DoS Against API State Files
 
 Remote reads/writes can put pressure on file-based state.
@@ -483,9 +577,10 @@ Mitigation: rate limits, request body size caps, existing per-user write locks, 
 1. Clean stale docs and save this Phase 3 design.
 2. Run SDK/protocol spike.
 3. Add `state:read` scope and API/token tests.
-4. Split shared MCP server/tool registration from stdio entrypoint.
-5. Add HTTP auth, scope mapping and rate limiter helpers with unit tests.
-6. Add HTTP entrypoint and `/mcp` contract tests.
-7. Add Dockerfile and optional compose profile.
-8. Update docs and deployment guidance.
-9. Run full API/MCP verification and final review before merge.
+4. Add request-scoped state/auth plumbing while preserving stdio compatibility.
+5. Split shared MCP server/tool registration from stdio entrypoint.
+6. Add HTTP auth, scope mapping and rate limiter helpers with unit tests.
+7. Add HTTP entrypoint and `/mcp` contract tests.
+8. Add Dockerfile and optional compose profile.
+9. Update docs and deployment guidance.
+10. Run full API/MCP verification and final review before merge.
