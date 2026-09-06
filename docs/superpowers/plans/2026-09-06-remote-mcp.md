@@ -118,7 +118,7 @@ git commit -m "docs: align mcp phase roadmap"
 - Create: `mcp/scripts/check-mcp-http-sdk.mjs`
 - Modify: `docs/superpowers/plans/2026-09-06-remote-mcp.md`
 
-- [ ] **Step 1: Inspect installed SDK exports**
+- [x] **Step 1: Inspect installed SDK exports**
 
 Create `mcp/scripts/check-mcp-http-sdk.mjs`:
 
@@ -140,7 +140,7 @@ for (const specifier of candidates) {
 }
 ```
 
-- [ ] **Step 2: Run SDK export check**
+- [x] **Step 2: Run SDK export check**
 
 Run:
 
@@ -150,7 +150,7 @@ cd mcp && node scripts/check-mcp-http-sdk.mjs
 
 Expected: identify whether the installed SDK exposes an HTTP/Streamable HTTP server transport.
 
-- [ ] **Step 3: Upgrade SDK if needed**
+- [x] **Step 3: Upgrade SDK if needed**
 
 If no usable HTTP transport exists, update SDK intentionally:
 
@@ -166,7 +166,7 @@ cd mcp && node scripts/check-mcp-http-sdk.mjs
 
 Expected: SDK exports are known and lockfile/package changes are explicit.
 
-- [ ] **Step 4: Decide transport path**
+- [x] **Step 4: Decide transport path**
 
 Document in this plan under this step:
 
@@ -182,7 +182,16 @@ Decision: use a minimal in-project JSON-RPC adapter for `tools/list` and `tools/
 
 Do not implement production HTTP yet.
 
-- [ ] **Step 5: Run current MCP verification**
+Decision: the current lockfile installs `@modelcontextprotocol/sdk` with
+`@modelcontextprotocol/sdk/server/streamableHttp.js` exporting
+`StreamableHTTPServerTransport`, so no package upgrade is needed for discovery.
+Use a minimal in-project JSON-RPC adapter first for `tools/list` and `tools/call`
+because Phase 3 must enforce project-specific bearer auth, request-scoped
+state/auth context, rate limits, mandatory 2026-07-28 headers and exact tests at
+the HTTP boundary. Keep the SDK transport export documented for a later swap if
+it cleanly supports per-request context and the same wire-level assertions.
+
+- [x] **Step 5: Run current MCP verification**
 
 Run:
 
@@ -193,7 +202,7 @@ cd mcp && npm run check:node-loadable
 
 Expected: pass. If SDK upgrade breaks tests, fix dependency/import issues before continuing.
 
-- [ ] **Step 6: Commit SDK decision**
+- [x] **Step 6: Commit SDK decision**
 
 ```bash
 git add mcp/package.json mcp/package-lock.json mcp/scripts/check-mcp-http-sdk.mjs docs/superpowers/plans/2026-09-06-remote-mcp.md
