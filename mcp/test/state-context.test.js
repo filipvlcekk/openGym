@@ -41,4 +41,18 @@ describe('request-scoped state helpers', () => {
       fs.rmSync(dataDir, { recursive: true, force: true })
     }
   })
+
+  test('rejects unsafe explicit uids for request-scoped reads', () => {
+    const dataDir = tempDataDir()
+    try {
+      expect(() => getStateForUid('user/../one', { dataDir })).toThrow(/safe in a filename/)
+      expect(() => getUserForUid('user/../one', { dataDir })).toThrow(/safe in a filename/)
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('honors an explicit empty dataDir instead of falling back to ambient DATA_DIR', () => {
+    expect(getStateForUid('definitely-missing-user', { dataDir: '' })).toBe(null)
+  })
 })

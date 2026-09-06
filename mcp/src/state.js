@@ -27,12 +27,16 @@ function safeUid(uid) {
   return value
 }
 
+function fileUid(uid) {
+  return String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
 function stateFileIn(dataDir, uid) {
   return path.join(dataDir, 'state-' + safeUid(uid) + '.json')
 }
 
 function stateFile(uid) {
-  return stateFileIn(DATA_DIR, uid)
+  return path.join(DATA_DIR, 'state-' + fileUid(uid) + '.json')
 }
 
 // Pick the uid: OPENGYM_UID env, else the only state-* file, else the only user in db.json.
@@ -128,13 +132,13 @@ export function getUser() {
 }
 
 export function getStateForUid(uid, options = {}) {
-  const dir = options.dataDir || DATA_DIR
+  const dir = options.dataDir ?? DATA_DIR
   const state = readJsonOrNull(stateFileIn(dir, uid))
   return state ? Object.assign({}, defaultsShape(), state) : null
 }
 
 export function getUserForUid(uid, options = {}) {
-  const dir = options.dataDir || DATA_DIR
+  const dir = options.dataDir ?? DATA_DIR
   const id = safeUid(uid)
   const db = readJsonOrNull(path.join(dir, 'db.json')) || { users: [] }
   const users = Array.isArray(db.users) ? db.users : []
