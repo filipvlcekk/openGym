@@ -838,7 +838,7 @@ git commit -m "feat: add remote mcp http auth"
 - Create: `mcp/src/rate-limit.js`
 - Create: `mcp/test/rate-limit.test.js`
 
-- [ ] **Step 1: Add failing limiter tests**
+- [x] **Step 1: Add failing limiter tests**
 
 Create tests for:
 
@@ -847,7 +847,7 @@ Create tests for:
 - separates buckets by key;
 - can use injected clock for deterministic tests.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -857,7 +857,7 @@ cd mcp && npm test -- rate-limit.test.js
 
 Expected: module missing.
 
-- [ ] **Step 3: Implement limiter**
+- [x] **Step 3: Implement limiter**
 
 Create `mcp/src/rate-limit.js`:
 
@@ -891,7 +891,7 @@ export function createFixedWindowLimiter({ limit, windowMs, now = () => Date.now
 }
 ```
 
-- [ ] **Step 4: Run limiter tests**
+- [x] **Step 4: Run limiter tests**
 
 Run:
 
@@ -901,7 +901,7 @@ cd mcp && npm test -- rate-limit.test.js
 
 Expected: pass.
 
-- [ ] **Step 5: Commit limiter**
+- [x] **Step 5: Commit limiter**
 
 ```bash
 git add mcp/src/rate-limit.js mcp/test/rate-limit.test.js
