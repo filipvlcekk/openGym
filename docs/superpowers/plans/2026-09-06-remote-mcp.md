@@ -753,7 +753,7 @@ git commit -m "feat: bind mcp tools to request context"
 - Create: `mcp/src/http-auth.js`
 - Create: `mcp/test/http-auth.test.js`
 
-- [ ] **Step 1: Add failing auth helper tests**
+- [x] **Step 1: Add failing auth helper tests**
 
 Create tests for:
 
@@ -763,7 +763,7 @@ Create tests for:
 - revoked token -> `401`, code `TOKEN_REVOKED`;
 - valid token returns request context with `auth.verified`, `token.id`, `token.uid`, `scopes`, `dataDir`.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -773,7 +773,7 @@ cd mcp && npm test -- http-auth.test.js
 
 Expected: fails because module does not exist.
 
-- [ ] **Step 3: Implement `parseBearerToken` and `authenticateHttpRequest`**
+- [x] **Step 3: Implement `parseBearerToken` and `authenticateHttpRequest`**
 
 Create `mcp/src/http-auth.js`:
 
@@ -815,7 +815,7 @@ export function authenticateHttpRequest(headers, options = {}) {
 
 Adjust status mapping if token service errors differ.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -825,7 +825,7 @@ cd mcp && npm test -- http-auth.test.js
 
 Expected: pass.
 
-- [ ] **Step 5: Commit HTTP auth helpers**
+- [x] **Step 5: Commit HTTP auth helpers**
 
 ```bash
 git add mcp/src/http-auth.js mcp/test/http-auth.test.js
