@@ -405,7 +405,7 @@ cd mcp && npm test
 
 Expected: pass.
 
-- [ ] **Step 5: Commit state helpers**
+- [x] **Step 5: Commit state helpers**
 
 ```bash
 git add mcp/src/state.js mcp/test/state-context.test.js
@@ -420,7 +420,7 @@ git commit -m "feat: add request scoped mcp state helpers"
 - Create: `mcp/src/tool-scopes.js`
 - Create: `mcp/test/tool-scopes.test.js`
 
-- [ ] **Step 1: Add failing scope mapping tests**
+- [x] **Step 1: Add failing scope mapping tests**
 
 Create `mcp/test/tool-scopes.test.js`:
 
@@ -453,7 +453,7 @@ describe('tool scope mapping', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -463,7 +463,7 @@ cd mcp && npm test -- tool-scopes.test.js
 
 Expected: fails because module does not exist.
 
-- [ ] **Step 3: Implement mapping**
+- [x] **Step 3: Implement mapping**
 
 Create `mcp/src/tool-scopes.js`:
 
@@ -503,7 +503,7 @@ export function requiredScopeForTool(name) {
 }
 ```
 
-- [ ] **Step 4: Add coverage for registry drift**
+- [x] **Step 4: Add coverage for registry drift**
 
 Extend test to import `TOOLS` and assert every registered tool has a scope:
 
@@ -516,7 +516,7 @@ test('every registered tool has a remote scope mapping', () => {
 });
 ```
 
-- [ ] **Step 5: Run MCP tests**
+- [x] **Step 5: Run MCP tests**
 
 Run:
 
@@ -526,7 +526,7 @@ cd mcp && npm test
 
 Expected: pass.
 
-- [ ] **Step 6: Commit scope mapping**
+- [x] **Step 6: Commit scope mapping**
 
 ```bash
 git add mcp/src/tool-scopes.js mcp/test/tool-scopes.test.js
