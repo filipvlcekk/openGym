@@ -32,7 +32,7 @@ Key rule: this is a conservative state guardrail, not a migration and not a comp
 **Files:**
 - Modify: `api/test/state-service.test.js`
 
-- [ ] **Step 1: Add local test helpers**
+- [x] **Step 1: Add local test helpers**
 
 Add after `readStored()`:
 
@@ -46,7 +46,7 @@ function issueText(result) {
 }
 ```
 
-- [ ] **Step 2: Add a passing compatibility fixture test**
+- [x] **Step 2: Add a passing compatibility fixture test**
 
 Add after `replaceUserState accepts a valid minimal openGym state shape`:
 
@@ -127,7 +127,7 @@ test('replaceUserState accepts conservative legacy imported and freestyle workou
 
 This test must pass both before and after implementation. It pins the compatibility boundary.
 
-- [ ] **Step 3: Add invalid workout metadata test**
+- [x] **Step 3: Add invalid workout metadata test**
 
 Add:
 
@@ -166,7 +166,7 @@ test('replaceUserState rejects invalid workout metadata without writing', () => 
 });
 ```
 
-- [ ] **Step 4: Add invalid entry and set test**
+- [x] **Step 4: Add invalid entry and set test**
 
 Add:
 
@@ -221,7 +221,7 @@ test('updateUserState rejects invalid workout entries and sets without changing 
 });
 ```
 
-- [ ] **Step 5: Add invalid target metadata test**
+- [x] **Step 5: Add invalid target metadata test**
 
 Add:
 
@@ -277,7 +277,7 @@ test('replaceUserState rejects invalid workout target metadata without writing',
 
 The exact implementation may emit more numeric target issues than asserted here. Keep assertions focused on representative fields plus `repsMax >= repsMin`.
 
-- [ ] **Step 6: Add invalid `exWeights` shape test**
+- [x] **Step 6: Add invalid `exWeights` shape test**
 
 Add:
 
@@ -312,7 +312,7 @@ test('updateUserState rejects invalid exWeights shape without changing state', (
 });
 ```
 
-- [ ] **Step 7: Strengthen active stripping test**
+- [x] **Step 7: Strengthen active stripping test**
 
 Modify `replaceUserState writes a sanitized full state and returns the sync timestamp` so `active` contains invalid workout-like data that would fail if it were not stripped:
 
@@ -326,7 +326,7 @@ active: {
 
 Keep the existing assertion that stored state has no `active` key.
 
-- [ ] **Step 8: Run API tests to verify RED**
+- [x] **Step 8: Run API tests to verify RED**
 
 Run:
 
@@ -340,7 +340,7 @@ Expected:
 - active stripping test passes;
 - invalid metadata/entry/set/target/`exWeights` tests fail because `api/state-validation.js` is still too shallow.
 
-- [ ] **Step 9: Commit RED tests**
+- [x] **Step 9: Commit RED tests**
 
 ```bash
 git add api/test/state-service.test.js
