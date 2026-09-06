@@ -22,6 +22,10 @@ function readStored(states, uid) {
   return JSON.parse(fs.readFileSync(states.stateFile(uid), 'utf8'));
 }
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function issueText(result) {
   return result.error.issues.map(i => `${i.path}: ${i.message}`).join('\n');
 }
@@ -153,12 +157,18 @@ test('replaceUserState accepts conservative legacy imported and freestyle workou
     const stored = readStored(states, 'u1');
     assert.equal(stored.workouts.length, 2);
     assert.equal(stored.workouts[1].routineId, null);
+    assert.deepEqual(stored.workouts, input.workouts);
+    assert.deepEqual(stored.exWeights, input.exWeights);
     assert.deepEqual(stored.exWeights['deleted-ex'], { w: 0, d: '2026-08-29' });
   });
 });
 
 test('replaceUserState rejects invalid workout metadata without writing', () => {
-  withTempStateService(states => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    const original = { ...clone(validState()), _revision: 3 };
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify(original));
+
     const input = validState();
     input.workouts = [{
       id: '',
@@ -173,7 +183,10 @@ test('replaceUserState rejects invalid workout metadata without writing', () => 
       entries: []
     }];
 
-    const result = states.replaceUserState('u1', input);
+    const result = states.replaceUserState(uid, input, {
+      actor: 'mcp-token:tok_1',
+      expectedRevision: 3
+    });
 
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'STATE_VALIDATION_FAILED');
@@ -186,8 +199,9 @@ test('replaceUserState rejects invalid workout metadata without writing', () => 
     assert.match(text, /workouts\.0\.bw: must be a positive finite number/);
     assert.match(text, /workouts\.0\.vol: must be a finite number >= 0/);
     assert.match(text, /workouts\.0\.prs\.1: must be a string/);
-    assert.equal(fs.existsSync(states.stateFile('u1')), false);
-  });
+    assert.deepEqual(readStored(states, uid), original);
+    assert.deepEqual(audit.readAuditEvents(), []);
+  }, { audit: true });
 });
 
 test('updateUserState rejects invalid workout entries and sets without changing state or audit', () => {
@@ -240,7 +254,11 @@ test('updateUserState rejects invalid workout entries and sets without changing 
 });
 
 test('replaceUserState rejects invalid workout target metadata without writing', () => {
-  withTempStateService(states => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    const original = { ...clone(validState()), _revision: 3 };
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify(original));
+
     const input = validState();
     input.workouts = [{
       id: 'bad-target',
@@ -269,7 +287,10 @@ test('replaceUserState rejects invalid workout target metadata without writing',
       }]
     }];
 
-    const result = states.replaceUserState('u1', input);
+    const result = states.replaceUserState(uid, input, {
+      actor: 'mcp-token:tok_1',
+      expectedRevision: 3
+    });
 
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'STATE_VALIDATION_FAILED');
@@ -277,14 +298,21 @@ test('replaceUserState rejects invalid workout target metadata without writing',
     assert.match(text, /workouts\.0\.entries\.0\.target\.id: must be a non-empty string/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.mode: must be reps, time or cardio/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.sets: must be a finite number >= 0/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.reps: must be a finite number >= 0/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.weight: must be a finite number >= 0/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.repsMax: must be >= repsMin/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.sec: must be a finite number >= 0/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.min: must be a finite number >= 0/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.speed: must be a finite number >= 0/);
+    assert.match(text, /workouts\.0\.entries\.0\.target\.inc: must be a finite number >= 0/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.bodyweight: must be a boolean/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.side: must be a boolean/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.prog: must be a string/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.policy: must be a string/);
     assert.match(text, /workouts\.0\.entries\.0\.target\.sg: must be a non-empty string/);
-    assert.equal(fs.existsSync(states.stateFile('u1')), false);
-  });
+    assert.deepEqual(readStored(states, uid), original);
+    assert.deepEqual(audit.readAuditEvents(), []);
+  }, { audit: true });
 });
 
 test('updateUserState rejects invalid exWeights shape without changing state', () => {
