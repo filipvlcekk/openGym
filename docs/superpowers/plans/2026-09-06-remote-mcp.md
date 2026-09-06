@@ -217,7 +217,7 @@ git commit -m "chore: document remote mcp transport strategy"
 - Modify: `api/token-service.js`
 - Modify: `api/test/token-service.test.js`
 
-- [ ] **Step 1: Add failing token scope test**
+- [x] **Step 1: Add failing token scope test**
 
 Add a test proving `state:read` is accepted, following the existing `withTempTokenService()` helper style:
 
@@ -246,7 +246,7 @@ test('createToken accepts remote MCP read scope', () => {
 
 Use the local test style if adding to an existing test file.
 
-- [ ] **Step 2: Run API tests to verify RED**
+- [x] **Step 2: Run API tests to verify RED**
 
 Run:
 
@@ -256,7 +256,7 @@ cd api && npm test
 
 Expected: fails with `invalid token scope: state:read`.
 
-- [ ] **Step 3: Add scope**
+- [x] **Step 3: Add scope**
 
 In `api/token-service.js`, add:
 
@@ -266,7 +266,7 @@ In `api/token-service.js`, add:
 
 to `TOKEN_SCOPES`.
 
-- [ ] **Step 4: Run API tests**
+- [x] **Step 4: Run API tests**
 
 Run:
 
@@ -276,7 +276,7 @@ cd api && npm test
 
 Expected: pass.
 
-- [ ] **Step 5: Commit scope**
+- [x] **Step 5: Commit scope**
 
 ```bash
 git add api/token-service.js api/test/token-service.test.js

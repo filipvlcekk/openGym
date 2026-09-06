@@ -67,6 +67,27 @@ test('createToken accepts exercise write scope', () => {
   });
 });
 
+test('createToken accepts remote MCP read scope', () => {
+  withTempTokenService(tokens => {
+    const created = tokens.createToken({
+      uid: 'u1',
+      name: 'Remote MCP',
+      scopes: ['state:read']
+    });
+
+    assert.deepEqual(created.record.scopes, ['state:read']);
+    assert.deepEqual(tokens.verifyToken(created.token, { requiredScope: 'state:read' }), {
+      ok: true,
+      token: {
+        id: created.record.id,
+        uid: 'u1',
+        name: 'Remote MCP',
+        scopes: ['state:read']
+      }
+    });
+  });
+});
+
 test('verifyToken returns token identity and updates last_used_at', () => {
   withTempTokenService((tokens, dataDir) => {
     const created = tokens.createToken({
