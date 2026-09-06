@@ -917,7 +917,7 @@ git commit -m "feat: add remote mcp rate limiter"
 - Modify: `mcp/src/index.js`
 - Modify: `mcp/scripts/check-node-loadable.mjs`
 
-- [ ] **Step 1: Create shared server factory**
+- [x] **Step 1: Create shared server factory**
 
 Move current `McpServer` creation and tool registration into `mcp/src/server.js`:
 
@@ -957,7 +957,7 @@ export function createOpenGymMcpServer(options = {}) {
 
 If HTTP needs per-request context and SDK server instances cannot vary context per request, keep this factory for stdio and use direct `TOOLS` dispatch in `http.js`.
 
-- [ ] **Step 2: Update stdio entrypoint**
+- [x] **Step 2: Update stdio entrypoint**
 
 In `mcp/src/index.js`, keep init/logging and replace local server construction with:
 
@@ -967,11 +967,11 @@ import { createOpenGymMcpServer } from './server.js';
 const server = createOpenGymMcpServer();
 ```
 
-- [ ] **Step 3: Update loadability script**
+- [x] **Step 3: Update loadability script**
 
 Add `../src/server.js` to `mcp/scripts/check-node-loadable.mjs`.
 
-- [ ] **Step 4: Run MCP tests and loadability**
+- [x] **Step 4: Run MCP tests and loadability**
 
 Run:
 
@@ -982,7 +982,7 @@ cd mcp && npm run check:node-loadable
 
 Expected: pass.
 
-- [ ] **Step 5: Commit server split**
+- [x] **Step 5: Commit server split**
 
 ```bash
 git add mcp/src/server.js mcp/src/index.js mcp/scripts/check-node-loadable.mjs
