@@ -4,7 +4,7 @@
 import { z } from 'zod'
 import { createAuditService } from '../../api/audit-service.js'
 import { createStateService } from '../../api/state-service.js'
-import { getState, getUser } from './state.js'
+import { getState, getUser, getStateForUid, getUserForUid } from './state.js'
 import { verifyMcpWriteToken } from './write-auth.js'
 import {
   setLabel, exLine, muscleName, policyName, friendlyDuration, ratio, muscleOrder, fmt
@@ -1168,6 +1168,54 @@ function writeStateServices(dataDir) {
   return createStateService({ dataDir, audit })
 }
 
+function isVerifiedHttpContext(context) {
+  return context?.transport === 'http' && context?.auth?.verified === true && context?.token?.uid
+}
+
+function stateForContext(context) {
+  return isVerifiedHttpContext(context)
+    ? getStateForUid(context.token.uid, { dataDir: context.dataDir })
+    : getState()
+}
+
+function userForContext(context) {
+  return isVerifiedHttpContext(context)
+    ? getUserForUid(context.token.uid, { dataDir: context.dataDir })
+    : getUser()
+}
+
+function writeAuthForContext(requiredScope, context) {
+  if (context?.transport === 'http') {
+    if (!isVerifiedHttpContext(context)) {
+      return {
+        ok: false,
+        error: {
+          code: 'TOKEN_INVALID',
+          message: 'HTTP tool context must contain a verified token.'
+        }
+      }
+    }
+    if (!Array.isArray(context.token.scopes) || !context.token.scopes.includes(requiredScope)) {
+      return {
+        ok: false,
+        error: {
+          code: 'TOKEN_FORBIDDEN',
+          message: 'Token missing required scope.',
+          required_scope: requiredScope
+        }
+      }
+    }
+    return { ok: true, token: context.token }
+  }
+  return verifyMcpWriteToken({ requiredScope })
+}
+
+function dataDirForContext(context) {
+  return isVerifiedHttpContext(context)
+    ? context.dataDir
+    : process.env.OPENGYM_DATA
+}
+
 /* ---------- tools ---------- */
 
 /** list_routines — names + counts of each routine in the user's plan. */
@@ -1175,8 +1223,8 @@ export const listRoutines = {
   name: 'list_routines',
   description: 'List the workout routines saved in the user\'s openGym profile (the same list the Plan screen shows). Each routine is a named set of exercises with set/rep targets. Use this to discover the plan structure before diving into a specific routine or today\'s workout.',
   schema: {},
-  handler: () => {
-    const S = getState()
+  handler: (_params, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     return {
       unit: S.unit || 'kg',
@@ -1197,8 +1245,8 @@ export const getRoutine = {
   name: 'get_routine',
   description: 'Get the full exercise list for a single routine (the same view the routine editor shows). Returns mode (reps/time/cardio), set/rep/weight targets, superset links, and any per-exercise custom increment you can override. Use routine_id from list_routines.',
   schema: { routine_id: z.string().min(1) },
-  handler: ({ routine_id }) => {
-    const S = getState()
+  handler: ({ routine_id }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const r = (S.routines || []).find(x => x.id === routine_id)
     if (!r) { const e = new Error(`no routine with id ${JSON.stringify(routine_id)}`); e.code = 'ENOENT'; throw e }
@@ -1240,8 +1288,8 @@ export const getWeekPlan = {
   name: 'get_week_plan',
   description: 'Show the user\'s weekly plan: which routine (if any) is assigned to each weekday, keyed by JS getDay() (Sunday=0, Monday=1, … Saturday=6 — the same convention the openGym state file uses). Also reports today\'s date and what routine applies today, accounting for one-off overrides the user may have set for a specific date (a "rest" override cancels the day).',
   schema: {},
-  handler: () => {
-    const S = getState()
+  handler: (_params, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const today = new Date()
     const isoToday = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0')
@@ -1278,8 +1326,8 @@ export const listWorkouts = {
     to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Inclusive end date YYYY-MM-DD. Defaults to today.'),
     limit: z.number().int().min(1).max(200).optional().describe('Max items to return. Defaults to 25.')
   },
-  handler: ({ from, to, limit }) => {
-    const S = getState()
+  handler: ({ from, to, limit }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const lim = Math.min(Math.max(limit || 25, 1), 200)
     const all = (S.workouts || []).slice().sort((a, b) => (b.d || '').localeCompare(a.d || ''))
@@ -1328,8 +1376,8 @@ export const getWorkout = {
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('The workout date as YYYY-MM-DD. If two sessions share that date, the answer lists them instead and asks for a workout_id.'),
     workout_id: z.string().min(1).optional().describe('The id from list_workouts. Preferred: it names one session even on a day with two.')
   },
-  handler: ({ date, workout_id }) => {
-    const S = getState()
+  handler: ({ date, workout_id }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const workouts = S.workouts || []
     let w
@@ -1384,8 +1432,8 @@ export const exerciseHistory = {
     exercise_id: z.string().min(1).describe('Exercise id from get_routine or get_workout entries.'),
     limit: z.number().int().min(1).max(100).optional().describe('Max sessions to return. Defaults to 10, capped at 100.')
   },
-  handler: ({ exercise_id, limit }) => {
-    const S = getState()
+  handler: ({ exercise_id, limit }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const lim = Math.min(Math.max(limit || 10, 1), 100)
     const rows = (S.workouts || [])
@@ -1434,8 +1482,8 @@ export const trainingSummary = {
   schema: {
     period: z.enum(['week', 'month', '6w', '12w', 'all']).describe('Summary window: last 7 days, last 30 days, last 6 weeks, last 12 weeks, or all history.')
   },
-  handler: ({ period }) => {
-    const S = getState()
+  handler: ({ period }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const range = periodRange(period)
     const workouts = (S.workouts || []).filter(w => inDateRange(w.d, range))
@@ -1472,8 +1520,8 @@ export const detectStalls = {
     window: z.number().int().min(3).max(8).optional().describe('Number of recent completed sessions to inspect per exercise. Defaults to 4.'),
     routine_id: z.string().min(1).optional().describe('Optional routine id from list_routines/get_routine. Limits the scan to that routine.')
   },
-  handler: ({ window, routine_id }) => {
-    const S = getState()
+  handler: ({ window, routine_id }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const win = Math.min(Math.max(window || 4, 3), 8)
     const candidates = routinesToScan(S, routine_id)
@@ -1500,8 +1548,8 @@ export const getBodyweight = {
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Inclusive start date YYYY-MM-DD.'),
     to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Inclusive end date YYYY-MM-DD. Defaults to today.')
   },
-  handler: ({ from, to }) => {
-    const S = getState()
+  handler: ({ from, to }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const goal = S.targetW || null
     const bw = (S.bodyweight || []).filter(b => {
@@ -1532,8 +1580,8 @@ export const estimate1rm = {
     exercise_id: z.string().optional().describe('An exercise id from list_routines or get_workout entries. If omitted, returns a full PR table.'),
     formula: z.enum(['epley', 'brzycki', 'lombardi']).optional().describe(`Formula to use. Defaults to ${DEFAULT_FORMULA}.`)
   },
-  handler: ({ exercise_id, formula }) => {
-    const S = getState()
+  handler: ({ exercise_id, formula }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const f = formula || DEFAULT_FORMULA
     if (exercise_id) {
@@ -1573,8 +1621,8 @@ export const muscleBalance = {
   schema: {
     period: z.enum(['week', 'month', 'all']).describe('window: last 7 days, last 30 days, or all-time')
   },
-  handler: ({ period }) => {
-    const S = getState()
+  handler: ({ period }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const now = Date.now()
     const cutoff = period === 'week' ? now - 7 * 86400000
@@ -1603,8 +1651,8 @@ export const progressionNext = {
     routine_id: z.string().min(1).describe('Routine id from list_routines/get_routine.'),
     exercise_id: z.string().min(1).describe('Exercise id from get_routine exercises.')
   },
-  handler: ({ routine_id, exercise_id }) => {
-    const S = getState()
+  handler: ({ routine_id, exercise_id }, context) => {
+    const S = stateForContext(context)
     if (!S) return noState()
     const routine = (S.routines || []).find(r => r.id === routine_id)
     if (!routine) { const e = new Error(`no routine with id ${JSON.stringify(routine_id)}`); e.code = 'ENOENT'; throw e }
@@ -1664,11 +1712,11 @@ export const overrideDay = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
-  handler: ({ date, routine_id, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'schedule:write' })
+  handler: ({ date, routine_id, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('schedule:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -1746,11 +1794,11 @@ export const assignWeekday = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
-  handler: ({ weekday, routine_id, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'schedule:write' })
+  handler: ({ weekday, routine_id, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('schedule:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -1825,11 +1873,11 @@ export const editRoutine = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
-  handler: ({ routine_id, ops, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'routine:write' })
+  handler: ({ routine_id, ops, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('routine:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -1898,11 +1946,11 @@ export const createCustomExercise = {
   name: 'create_custom_exercise',
   description: 'Create one custom exercise in the profile catalogue. Requires OPENGYM_MCP_TOKEN with exercise:write. Use edit_routine.add_exercise separately to add it to a routine.',
   schema: createCustomExerciseSchema,
-  handler: ({ name, body_part, description = '', expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'exercise:write' })
+  handler: ({ name, body_part, description = '', expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('exercise:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -1960,11 +2008,11 @@ export const addBodyweight = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview changes without writing. Defaults to true.')
   },
-  handler: ({ date = currentISO(), weight, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'bodyweight:write' })
+  handler: ({ date = currentISO(), weight, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('bodyweight:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -2043,11 +2091,11 @@ export const logWorkout = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview the finished workout without writing. Defaults to true.')
   },
-  handler: ({ routine_id, date = currentISO(), duration_min, bodyweight, entries, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'workout:write' })
+  handler: ({ routine_id, date = currentISO(), duration_min, bodyweight, entries, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('workout:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()
@@ -2113,11 +2161,11 @@ export const logFreestyleWorkout = {
     expected_revision: z.number().int().min(0).describe('State _revision observed before proposing the write. Prevents lost updates.'),
     dry_run: z.boolean().optional().describe('When true, preview the finished workout without writing. Defaults to true.')
   },
-  handler: ({ name, date = currentISO(), duration_min, bodyweight, entries, expected_revision, dry_run = true }) => {
-    const auth = verifyMcpWriteToken({ requiredScope: 'workout:write' })
+  handler: ({ name, date = currentISO(), duration_min, bodyweight, entries, expected_revision, dry_run = true }, context) => {
+    const auth = writeAuthForContext('workout:write', context)
     if (!auth.ok) return auth
 
-    const dataDir = process.env.OPENGYM_DATA
+    const dataDir = dataDirForContext(context)
     const states = writeStateServices(dataDir)
     const S = states.readUserState(auth.token.uid)
     if (!S) return noState()

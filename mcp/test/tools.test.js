@@ -30,10 +30,10 @@ const byName = Object.fromEntries(TOOLS.map(t => [t.name, t.handler]))
 
 let S = null
 
-function call(name, params = {}) {
+function call(name, params = {}, context = undefined) {
   const h = byName[name]
   if (!h) throw new Error(`unknown tool ${name}`)
-  return h(params)
+  return h(params, context)
 }
 
 function freshState() {
@@ -293,6 +293,126 @@ afterAll(() => {
 beforeEach(() => {
   S = freshState()
   _seedStateForTests(S)
+})
+
+/* ---------- request context ---------- */
+
+describe('request context', () => {
+  test('read tools use request context uid when provided', () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-mcp-context-tools-'))
+    const prevUid = process.env.OPENGYM_UID
+    try {
+      process.env.OPENGYM_UID = 'user-b'
+      fs.writeFileSync(path.join(dataDir, 'db.json'), JSON.stringify({
+        users: [
+          { id: 'user-a', name: 'A', created: '2026-09-06T00:00:00.000Z' },
+          { id: 'user-b', name: 'B', created: '2026-09-06T00:00:00.000Z' }
+        ],
+        creds: [],
+        subs: [],
+        invites: []
+      }))
+      fs.writeFileSync(stateFile(dataDir, 'user-a'), JSON.stringify({
+        unit: 'kg',
+        routines: [{ id: 'a-routine', name: 'A Routine', ex: [] }],
+        week: {},
+        dayPlan: {},
+        workouts: [],
+        bodyweight: []
+      }))
+      fs.writeFileSync(stateFile(dataDir, 'user-b'), JSON.stringify({
+        unit: 'kg',
+        routines: [{ id: 'b-routine', name: 'B Routine', ex: [] }],
+        week: {},
+        dayPlan: {},
+        workouts: [],
+        bodyweight: []
+      }))
+
+      const result = call('list_routines', {}, {
+        transport: 'http',
+        dataDir,
+        auth: { verified: true },
+        token: { id: 'tok_a', uid: 'user-a', name: 'A token', scopes: ['state:read'] }
+      })
+
+      expect(result.routines.map(r => r.id)).toEqual(['a-routine'])
+    } finally {
+      if (prevUid === undefined) delete process.env.OPENGYM_UID
+      else process.env.OPENGYM_UID = prevUid
+      fs.rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('write tools use request context identity and data dir when provided', () => {
+    const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-mcp-context-remote-'))
+    const ambientDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opengym-mcp-context-ambient-'))
+    const prevData = process.env.OPENGYM_DATA
+    const prevToken = process.env.OPENGYM_MCP_TOKEN
+    try {
+      fs.writeFileSync(stateFile(remoteDir, 'user-a'), JSON.stringify(writeToolState()))
+      fs.writeFileSync(stateFile(remoteDir, 'user-b'), JSON.stringify({
+        ...writeToolState(),
+        dayPlan: { '2026-08-31': 'rest', untouched: 'remote-b' }
+      }))
+      fs.writeFileSync(stateFile(ambientDir, 'user-b'), JSON.stringify({
+        ...writeToolState(),
+        dayPlan: { '2026-08-31': 'rest', untouched: 'ambient-b' }
+      }))
+
+      const remoteTokens = createTokenService({ dataDir: remoteDir })
+      const remoteCreated = remoteTokens.createToken({
+        uid: 'user-a',
+        name: 'A token',
+        scopes: ['schedule:write']
+      })
+      const ambientTokens = createTokenService({ dataDir: ambientDir })
+      const ambientCreated = ambientTokens.createToken({
+        uid: 'user-b',
+        name: 'B token',
+        scopes: ['schedule:write']
+      })
+      process.env.OPENGYM_DATA = ambientDir
+      process.env.OPENGYM_MCP_TOKEN = ambientCreated.token
+
+      const result = call('override_day', {
+        date: '2026-08-31',
+        routine_id: 'push',
+        expected_revision: 7,
+        dry_run: false
+      }, {
+        transport: 'http',
+        dataDir: remoteDir,
+        auth: { verified: true },
+        token: {
+          id: remoteCreated.record.id,
+          uid: 'user-a',
+          name: 'A token',
+          scopes: ['schedule:write']
+        }
+      })
+
+      expect(result.ok).toBe(true)
+      expect(readDiskState(remoteDir, 'user-a').dayPlan['2026-08-31']).toBe('push')
+      expect(readDiskState(remoteDir, 'user-b').dayPlan).toEqual({ '2026-08-31': 'rest', untouched: 'remote-b' })
+      expect(readDiskState(ambientDir, 'user-b').dayPlan).toEqual({ '2026-08-31': 'rest', untouched: 'ambient-b' })
+      const events = readAuditEvents(remoteDir)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        uid: 'user-a',
+        actor: `mcp-token:${remoteCreated.record.id}`,
+        token_id: remoteCreated.record.id
+      })
+      expect(readAuditEvents(ambientDir)).toEqual([])
+    } finally {
+      if (prevData === undefined) delete process.env.OPENGYM_DATA
+      else process.env.OPENGYM_DATA = prevData
+      if (prevToken === undefined) delete process.env.OPENGYM_MCP_TOKEN
+      else process.env.OPENGYM_MCP_TOKEN = prevToken
+      fs.rmSync(remoteDir, { recursive: true, force: true })
+      fs.rmSync(ambientDir, { recursive: true, force: true })
+    }
+  })
 })
 
 /* ---------- list_routines ---------- */

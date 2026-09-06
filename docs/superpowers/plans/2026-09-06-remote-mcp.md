@@ -540,7 +540,7 @@ git commit -m "feat: map mcp tools to remote scopes"
 - Modify: `mcp/src/write-auth.js`
 - Modify: `mcp/test/tools.test.js`
 
-- [ ] **Step 1: Add failing HTTP-context read isolation test**
+- [x] **Step 1: Add failing HTTP-context read isolation test**
 
 In `mcp/test/tools.test.js`, add a test that seeds two disk states and calls a read tool with context:
 
@@ -594,7 +594,7 @@ test('read tools use request context uid when provided', () => {
 
 Update local `call()` helper to pass optional context to handlers.
 
-- [ ] **Step 2: Add failing HTTP-context write identity test**
+- [x] **Step 2: Add failing HTTP-context write identity test**
 
 Add a test that creates two users, sets `OPENGYM_UID` and `OPENGYM_DATA` to user B's data directory, creates a token for user A in a separate HTTP `dataDir` with `schedule:write`, and calls `override_day` with an HTTP context representing that verified token.
 
@@ -606,7 +606,7 @@ Expected assertions:
 - audit event `token_id` is user A token id.
 - no file in the env `OPENGYM_DATA` directory changed.
 
-- [ ] **Step 3: Run targeted tests to verify RED**
+- [x] **Step 3: Run targeted tests to verify RED**
 
 Run:
 
@@ -616,7 +616,7 @@ cd mcp && npm test -- tools.test.js
 
 Expected: new tests fail because handlers ignore context or write auth falls back to env.
 
-- [ ] **Step 4: Add context helpers inside `mcp/src/tools.js`**
+- [x] **Step 4: Add context helpers inside `mcp/src/tools.js`**
 
 Import:
 
@@ -728,7 +728,7 @@ handler: (params, context) => {
 
 Existing stdio tests pass no context and keep old env-token behavior. HTTP server code must construct context only from `authenticateHttpRequest()`. Tests may use a `verifiedHttpContext()` helper to avoid duplicating auth setup, but that helper must set `auth: { verified: true }` explicitly.
 
-- [ ] **Step 5: Run MCP tests**
+- [x] **Step 5: Run MCP tests**
 
 Run:
 
@@ -738,7 +738,7 @@ cd mcp && npm test
 
 Expected: pass.
 
-- [ ] **Step 6: Commit context-aware tools**
+- [x] **Step 6: Commit context-aware tools**
 
 ```bash
 git add mcp/src/tools.js mcp/src/write-auth.js mcp/test/tools.test.js
