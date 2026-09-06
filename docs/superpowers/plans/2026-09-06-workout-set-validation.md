@@ -771,7 +771,7 @@ git status --short
 
 Expected: only intended files are modified.
 
-- [ ] **Step 9: Commit docs and checklist**
+- [x] **Step 9: Commit docs and checklist**
 
 ```bash
 git add docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md docs/superpowers/plans/2026-09-06-workout-set-validation.md
