@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import http from 'node:http'
+import { z } from 'zod'
 
 import { authenticateHttpRequest } from './http-auth.js'
 import { createFixedWindowLimiter } from './rate-limit.js'
@@ -10,6 +11,7 @@ export const MCP_PROTOCOL_VERSION = '2026-07-28'
 const HEADER_ERROR = -32020
 const METHOD_NOT_FOUND = -32601
 const INVALID_REQUEST = -32600
+const INVALID_PARAMS = -32602
 const INTERNAL_ERROR = -32603
 
 function jsonRpcError(id, code, message, data = {}) {
@@ -66,7 +68,8 @@ function allowedOrigins(options) {
   return listFromEnv('MCP_ALLOWED_ORIGINS')
 }
 
-function clientIp(req) {
+function clientIp(req, options = {}) {
+  if (!options.trustProxy) return req.socket.remoteAddress || 'unknown'
   const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
   return forwarded || req.socket.remoteAddress || 'unknown'
 }
@@ -75,25 +78,32 @@ function validateOrigin(req, options) {
   const origin = req.headers.origin
   if (!origin) return null
   const allowed = allowedOrigins(options)
-  if (!allowed.length || allowed.includes(origin)) return null
+  if (allowed.includes(origin)) return null
   return { status: 403, code: 'MCP_ORIGIN_FORBIDDEN', message: 'Origin is not allowed.' }
 }
 
 function readBody(req, limitBytes) {
   return new Promise((resolve, reject) => {
     let total = 0
+    let done = false
     const chunks = []
     req.on('data', chunk => {
+      if (done) return
       total += chunk.length
       if (total > limitBytes) {
+        done = true
         reject(Object.assign(new Error('Request body too large.'), { status: 413, code: 'MCP_BODY_TOO_LARGE' }))
-        req.destroy()
+        req.pause()
         return
       }
       chunks.push(chunk)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
+    req.on('end', () => {
+      if (!done) resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', err => {
+      if (!done) reject(err)
+    })
   })
 }
 
@@ -149,8 +159,8 @@ function validateProtocol(req, body) {
   return null
 }
 
-function authFailureRateLimit(req, limiters) {
-  return limiters.authFail.check(`auth-fail:${clientIp(req)}`)
+function authFailureRateLimit(req, limiters, options) {
+  return limiters.authFail.check(`auth-fail:${clientIp(req, options)}`)
 }
 
 function tokenRateLimit(context, limiters) {
@@ -219,6 +229,19 @@ function verifyScope(toolName, context) {
   return { ok: true, requiredScope }
 }
 
+function parseToolArguments(tool, args) {
+  const parsed = z.object(tool.schema || {}).strict().safeParse(args || {})
+  if (parsed.success) return { ok: true, args: parsed.data }
+  return {
+    ok: false,
+    message: 'Invalid tool arguments.',
+    issues: parsed.error.issues.map(issue => ({
+      path: issue.path.join('.'),
+      message: issue.message
+    }))
+  }
+}
+
 async function handleRpc(req, res, body, context, limiters) {
   const id = body?.id ?? null
   const tokenLimit = tokenRateLimit(context, limiters)
@@ -246,8 +269,15 @@ async function handleRpc(req, res, body, context, limiters) {
   if (!opLimit.ok) return rateLimited(res, id, opLimit)
 
   const tool = TOOLS.find(t => t.name === toolName)
+  const parsedArgs = parseToolArguments(tool, body.params?.arguments)
+  if (!parsedArgs.ok) {
+    return sendRpcError(res, 400, id, INVALID_PARAMS, parsedArgs.message, {
+      code: 'MCP_INVALID_PARAMS',
+      issues: parsedArgs.issues
+    })
+  }
   try {
-    const result = tool.handler(body.params?.arguments || {}, context)
+    const result = tool.handler(parsedArgs.args, context)
     return sendJson(res, 200, jsonRpcResult(id, toolResult(result)))
   } catch (err) {
     const code = err.code || 'ERROR'
@@ -287,8 +317,9 @@ export function createHttpMcpServer(options = {}) {
       body = JSON.parse(await readBody(req, limitBytes) || '{}')
     } catch (err) {
       const status = err.status || 400
-      return sendRpcError(res, status, null, INVALID_REQUEST, err.message || 'Invalid JSON.', {
-        code: err.code || 'MCP_INVALID_JSON'
+      const bodyError = err.code === 'MCP_BODY_TOO_LARGE'
+      return sendRpcError(res, status, null, INVALID_REQUEST, bodyError ? err.message : 'Invalid JSON.', {
+        code: bodyError ? err.code : 'MCP_INVALID_JSON'
       })
     }
 
@@ -299,7 +330,7 @@ export function createHttpMcpServer(options = {}) {
 
     const auth = authenticateHttpRequest(req.headers, { dataDir })
     if (!auth.ok) {
-      const failedLimit = authFailureRateLimit(req, limiters)
+      const failedLimit = authFailureRateLimit(req, limiters, options)
       if (!failedLimit.ok) return rateLimited(res, body.id, failedLimit)
       return sendRpcError(res, auth.status, body.id, -32001, auth.error.message, auth.error)
     }

@@ -69,14 +69,16 @@ async function close(server) {
 }
 
 function rpcBody(method, params = {}) {
+  const { _meta, ...rest } = params
   return {
     jsonrpc: '2.0',
     id: 1,
     method,
     params: {
-      ...params,
+      ...rest,
       _meta: {
-        'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION
+        'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION,
+        ...(_meta || {})
       }
     }
   }
@@ -96,6 +98,19 @@ async function postRpc(baseUrl, body, { token, headers = {} } = {}) {
       ...headers
     },
     body: JSON.stringify(body)
+  })
+  const json = await res.json()
+  return { res, json }
+}
+
+async function postRaw(baseUrl, body, { headers = {} } = {}) {
+  const res = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...headers
+    },
+    body
   })
   const json = await res.json()
   return { res, json }
@@ -142,6 +157,20 @@ describe('remote MCP HTTP server', () => {
     const { res, json } = await postRpc(baseUrl, rpcBody('tools/list'), {
       token,
       headers: { origin: 'https://evil.example' }
+    })
+
+    expect(res.status).toBe(403)
+    expect(json.error.data.code).toBe('MCP_ORIGIN_FORBIDDEN')
+  })
+
+  test('present Origin is rejected when no allowlist is configured', async () => {
+    await close(server)
+    server = createHttpMcpServer({ dataDir })
+    baseUrl = await listen(server)
+    const token = createToken(dataDir).token
+    const { res, json } = await postRpc(baseUrl, rpcBody('tools/list'), {
+      token,
+      headers: { origin: 'https://client.example' }
     })
 
     expect(res.status).toBe(403)
@@ -196,6 +225,10 @@ describe('remote MCP HTTP server', () => {
 
     expect(res.status).toBe(400)
     expect(json.error.code).toBe(-32020)
+    expect(json.error.data).toMatchObject({
+      expected: PROTOCOL_VERSION,
+      received: '2025-03-26'
+    })
   })
 
   test('mismatched Mcp-Method returns header validation error', async () => {
@@ -294,6 +327,25 @@ describe('remote MCP HTTP server', () => {
     })
   })
 
+  test('invalid tool arguments return invalid params without writing', async () => {
+    writeState(dataDir, 'user-a')
+    const token = createToken(dataDir, { uid: 'user-a', scopes: ['schedule:write'] }).token
+    const { res, json } = await postRpc(baseUrl, rpcBody('tools/call', {
+      name: 'override_day',
+      arguments: {
+        date: '2026-08-31',
+        routine_id: 'push',
+        dry_run: false
+      }
+    }), { token })
+
+    expect(res.status).toBe(400)
+    expect(json.error.code).toBe(-32602)
+    expect(json.error.data.code).toBe('MCP_INVALID_PARAMS')
+    expect(readState(dataDir, 'user-a').dayPlan['2026-08-31']).toBe('rest')
+    expect(readAuditEvents(dataDir)).toEqual([])
+  })
+
   test('token without write scope cannot call write tools', async () => {
     const token = createToken(dataDir, { scopes: ['state:read'] }).token
     const { res, json } = await postRpc(baseUrl, rpcBody('tools/call', {
@@ -389,5 +441,47 @@ describe('remote MCP HTTP server', () => {
     const tokenLimited = await postRpc(baseUrl, body, { token })
     expect(tokenLimited.res.status).toBe(429)
     expect(tokenLimited.res.headers.get('retry-after')).toBeTruthy()
+  })
+
+  test('failed-auth limiter ignores spoofed X-Forwarded-For by default', async () => {
+    await close(server)
+    server = createHttpMcpServer({
+      dataDir,
+      rateLimits: {
+        authFail: { limit: 1, windowMs: 60000 },
+        token: { limit: 10, windowMs: 60000 },
+        read: { limit: 10, windowMs: 60000 },
+        write: { limit: 10, windowMs: 60000 }
+      }
+    })
+    baseUrl = await listen(server)
+    const body = rpcBody('tools/list')
+
+    expect((await postRpc(baseUrl, body, {
+      headers: { 'x-forwarded-for': '203.0.113.1' }
+    })).res.status).toBe(401)
+    const limited = await postRpc(baseUrl, body, {
+      headers: { 'x-forwarded-for': '203.0.113.2' }
+    })
+    expect(limited.res.status).toBe(429)
+  })
+
+  test('oversized bodies return a JSON-RPC body limit error', async () => {
+    await close(server)
+    server = createHttpMcpServer({ dataDir, bodyLimitBytes: 8 })
+    baseUrl = await listen(server)
+
+    const { res, json } = await postRaw(baseUrl, JSON.stringify(rpcBody('tools/list')))
+
+    expect(res.status).toBe(413)
+    expect(json.error.data.code).toBe('MCP_BODY_TOO_LARGE')
+  })
+
+  test('malformed JSON returns a generic message without echoing body text', async () => {
+    const { res, json } = await postRaw(baseUrl, '{ "secret": "SECRETFRAGMENT",')
+
+    expect(res.status).toBe(400)
+    expect(json.error.message).toBe('Invalid JSON.')
+    expect(JSON.stringify(json)).not.toContain('SECRETFRAGMENT')
   })
 })
