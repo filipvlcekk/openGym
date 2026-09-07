@@ -346,6 +346,18 @@ describe('remote MCP HTTP server', () => {
     expect(readAuditEvents(dataDir)).toEqual([])
   })
 
+  test('falsy primitive tool arguments are rejected instead of coerced to empty object', async () => {
+    const token = createToken(dataDir, { scopes: ['state:read'] }).token
+    const { res, json } = await postRpc(baseUrl, rpcBody('tools/call', {
+      name: 'list_routines',
+      arguments: false
+    }), { token })
+
+    expect(res.status).toBe(400)
+    expect(json.error.code).toBe(-32602)
+    expect(json.error.data.code).toBe('MCP_INVALID_PARAMS')
+  })
+
   test('token without write scope cannot call write tools', async () => {
     const token = createToken(dataDir, { scopes: ['state:read'] }).token
     const { res, json } = await postRpc(baseUrl, rpcBody('tools/call', {
@@ -474,6 +486,7 @@ describe('remote MCP HTTP server', () => {
     const { res, json } = await postRaw(baseUrl, JSON.stringify(rpcBody('tools/list')))
 
     expect(res.status).toBe(413)
+    expect(res.headers.get('connection')).toBe('close')
     expect(json.error.data.code).toBe('MCP_BODY_TOO_LARGE')
   })
 

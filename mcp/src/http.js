@@ -230,7 +230,7 @@ function verifyScope(toolName, context) {
 }
 
 function parseToolArguments(tool, args) {
-  const parsed = z.object(tool.schema || {}).strict().safeParse(args || {})
+  const parsed = z.object(tool.schema || {}).strict().safeParse(args === undefined ? {} : args)
   if (parsed.success) return { ok: true, args: parsed.data }
   return {
     ok: false,
@@ -320,7 +320,7 @@ export function createHttpMcpServer(options = {}) {
       const bodyError = err.code === 'MCP_BODY_TOO_LARGE'
       return sendRpcError(res, status, null, INVALID_REQUEST, bodyError ? err.message : 'Invalid JSON.', {
         code: bodyError ? err.code : 'MCP_INVALID_JSON'
-      })
+      }, bodyError ? { connection: 'close' } : {})
     }
 
     const protocolFailure = validateProtocol(req, body)
