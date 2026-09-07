@@ -1184,7 +1184,7 @@ git commit -m "feat: add remote mcp http endpoint"
 - Modify: `docker-compose.yml`
 - Modify: `.dockerignore` if needed
 
-- [ ] **Step 1: Add Dockerfile**
+- [x] **Step 1: Add Dockerfile**
 
 Create `mcp/Dockerfile`:
 
@@ -1216,7 +1216,7 @@ CMD ["node", "src/http.js"]
 
 Adjust copied paths based on actual imports from `mcp/src/tools.js`; keep image minimal but correct.
 
-- [ ] **Step 2: Add compose profile service**
+- [x] **Step 2: Add compose profile service**
 
 Add to `docker-compose.yml`:
 
@@ -1247,7 +1247,7 @@ Add to `docker-compose.yml`:
 
 This keeps the default host bind local-only while allowing a host reverse proxy to reach it.
 
-- [ ] **Step 3: Validate compose syntax**
+- [x] **Step 3: Validate compose syntax**
 
 Run:
 
@@ -1257,7 +1257,11 @@ docker compose config
 
 Expected: config renders, includes `mcp-http` with `profiles: ["mcp-http"]`, and keeps the default published bind on `127.0.0.1`. If Docker is unavailable, document that verification could not be run.
 
-- [ ] **Step 4: Build optional image if Docker is available**
+Result: `docker compose config` could not be run in this environment because
+`docker` is not installed (`zsh:1: command not found: docker`). The compose
+diff was checked manually and `git diff --check` passed.
+
+- [x] **Step 4: Build optional image if Docker is available**
 
 Run:
 
@@ -1267,7 +1271,10 @@ docker compose --profile mcp-http build mcp-http
 
 Expected: build succeeds. If dependency install needs network and fails in sandbox, rerun with approval.
 
-- [ ] **Step 5: Commit container config**
+Result: skipped for the same environment reason as Step 3: Docker CLI is not
+installed in this workspace.
+
+- [x] **Step 5: Commit container config**
 
 ```bash
 git add mcp/Dockerfile docker-compose.yml
