@@ -995,7 +995,7 @@ git commit -m "refactor: share mcp server registration"
 - Create: `mcp/test/http.test.js`
 - Create: `mcp/src/http.js` initially minimal if needed for imports
 
-- [ ] **Step 1: Add HTTP test harness**
+- [x] **Step 1: Add HTTP test harness**
 
 Use Node `http` client or `fetch` against an ephemeral server. Export a factory from `mcp/src/http.js` so tests can start/stop without binding a fixed port:
 
@@ -1005,7 +1005,7 @@ export function createHttpMcpServer(options = {}) {
 }
 ```
 
-- [ ] **Step 2: Add failing route/auth tests**
+- [x] **Step 2: Add failing route/auth tests**
 
 Test:
 
@@ -1021,7 +1021,7 @@ Test:
 - missing or mismatched `Mcp-Name` for `tools/call` returns `400` with JSON-RPC `error.code === -32020`;
 - unknown JSON-RPC method returns HTTP `404` with JSON-RPC `-32601`.
 
-- [ ] **Step 3: Add failing tool tests**
+- [x] **Step 3: Add failing tool tests**
 
 Test:
 
@@ -1033,7 +1033,7 @@ Test:
 - HTTP write ignores mismatched `OPENGYM_UID` and uses bearer token uid;
 - audit event contains bearer token id.
 
-- [ ] **Step 4: Add failing rate-limit test**
+- [x] **Step 4: Add failing rate-limit test**
 
 Configure low limits through server options and assert:
 
@@ -1041,7 +1041,7 @@ Configure low limits through server options and assert:
 - authenticated token requests over the token limit return `429`;
 - `Retry-After` header exists.
 
-- [ ] **Step 5: Run HTTP tests to verify RED**
+- [x] **Step 5: Run HTTP tests to verify RED**
 
 Run:
 
@@ -1057,7 +1057,7 @@ Expected: fail because HTTP server is not implemented.
 - Modify: `mcp/src/http.js`
 - Modify: `mcp/scripts/check-node-loadable.mjs`
 
-- [ ] **Step 1: Implement route skeleton**
+- [x] **Step 1: Implement route skeleton**
 
 Use Node `http` unless SDK spike selected a specific SDK HTTP transport.
 
@@ -1074,7 +1074,7 @@ Skeleton responsibilities:
 - rate checks;
 - dispatch.
 
-- [ ] **Step 2: Implement JSON-RPC helpers**
+- [x] **Step 2: Implement JSON-RPC helpers**
 
 Add helpers inside `mcp/src/http.js` or a small internal module:
 
@@ -1095,7 +1095,7 @@ Use required JSON-RPC numeric codes plus stable `error.data.code` values:
 - unknown methods: `error.code === -32601`, `error.data.code === 'MCP_METHOD_NOT_FOUND'`;
 - auth/scope/rate failures: use suitable transport JSON-RPC codes with local `error.data.code` values such as `MCP_AUTH_REQUIRED`, `TOKEN_INVALID`, `TOKEN_FORBIDDEN`, `MCP_RATE_LIMITED`.
 
-- [ ] **Step 3: Implement header validation**
+- [x] **Step 3: Implement header validation**
 
 For target `2026-07-28`:
 
@@ -1109,7 +1109,7 @@ For target `2026-07-28`:
 
 Tests should pin behavior. If the SDK path handles headers itself, keep tests at the public server level.
 
-- [ ] **Step 4: Implement dispatch**
+- [x] **Step 4: Implement dispatch**
 
 For minimal adapter:
 
@@ -1120,7 +1120,7 @@ For minimal adapter:
 
 Do not expose prompts/resources unless existing stdio server exposes them.
 
-- [ ] **Step 5: Wire auth/scope/rate**
+- [x] **Step 5: Wire auth/scope/rate**
 
 Order:
 
@@ -1135,7 +1135,7 @@ Order:
 
 Do not log raw tokens or request bodies.
 
-- [ ] **Step 6: Add HTTP module to loadability**
+- [x] **Step 6: Add HTTP module to loadability**
 
 Add new modules to `mcp/scripts/check-node-loadable.mjs`:
 
@@ -1147,7 +1147,7 @@ Add new modules to `mcp/scripts/check-node-loadable.mjs`:
 '../src/server.js'
 ```
 
-- [ ] **Step 7: Run HTTP tests**
+- [x] **Step 7: Run HTTP tests**
 
 Run:
 
@@ -1157,7 +1157,7 @@ cd mcp && npm test -- http.test.js
 
 Expected: pass.
 
-- [ ] **Step 8: Run full MCP tests and loadability**
+- [x] **Step 8: Run full MCP tests and loadability**
 
 Run:
 
@@ -1168,7 +1168,7 @@ cd mcp && npm run check:node-loadable
 
 Expected: pass.
 
-- [ ] **Step 9: Commit HTTP server**
+- [x] **Step 9: Commit HTTP server**
 
 ```bash
 git add mcp/src/http.js mcp/test/http.test.js mcp/scripts/check-node-loadable.mjs

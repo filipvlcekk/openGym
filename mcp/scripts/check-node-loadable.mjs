@@ -45,6 +45,7 @@ for (const entry of [
   '../src/tool-scopes.js',
   '../src/http-auth.js',
   '../src/rate-limit.js',
+  '../src/http.js',
   '../src/server.js'
 ]) {
   try {
