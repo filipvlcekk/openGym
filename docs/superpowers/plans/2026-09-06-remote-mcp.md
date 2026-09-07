@@ -1292,7 +1292,7 @@ git commit -m "feat: add optional remote mcp container"
 - Modify: `.env.example` only if present
 - Modify: `README.md` only if the root deployment section should mention the optional profile.
 
-- [ ] **Step 1: Document env vars**
+- [x] **Step 1: Document env vars**
 
 Document:
 
@@ -1306,7 +1306,7 @@ MCP_RATE_READ_PER_MIN=60
 MCP_RATE_WRITE_PER_MIN=20
 ```
 
-- [ ] **Step 2: Document token scopes**
+- [x] **Step 2: Document token scopes**
 
 Explain:
 
@@ -1315,7 +1315,7 @@ Explain:
 - issue combined-scope tokens for clients that need read+write;
 - revocation through existing token UI/API stops Remote MCP.
 
-- [ ] **Step 3: Document reverse proxy requirement**
+- [x] **Step 3: Document reverse proxy requirement**
 
 Add:
 
@@ -1325,11 +1325,11 @@ Do not expose Remote MCP over plain public HTTP. Keep the container bound to loc
 
 Include a minimal Caddy/nginx example only if it stays short and generic.
 
-- [ ] **Step 4: Update roadmap status**
+- [x] **Step 4: Update roadmap status**
 
 Mark Phase 3 Remote MCP as implemented once code is done. Before code is done, mark the plan/spec as prepared only.
 
-- [ ] **Step 5: Run docs checks**
+- [x] **Step 5: Run docs checks**
 
 Run:
 
@@ -1340,7 +1340,7 @@ rg -n "future: deeper shared workout/set validation|Remaining work: deeper share
 
 Expected: no active roadmap stale text.
 
-- [ ] **Step 6: Commit docs**
+- [x] **Step 6: Commit docs**
 
 ```bash
 git add README.md mcp/README.md docs/MCP_WRITE_ARCHITECTURE.md docs/openGym_AI_Coach_MCP_dokumentace.md

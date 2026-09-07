@@ -154,8 +154,24 @@ All via `.env` (see `.env.example`):
 | `RP_NAME`     | Name shown in the passkey prompt                     | `openGym`               |
 | `ADMIN_UIDS`  | User ids that get the admin dashboard (comma-separated) | *(none)*             |
 | `INVITE_ONLY` | Require an invite code to create a profile           | *(off)*                 |
+| `MCP_HTTP_BIND` | Optional Remote MCP host bind address              | `127.0.0.1`             |
+| `MCP_HTTP_PORT_PUBLIC` | Optional Remote MCP host port                 | `3010`                  |
+| `MCP_ALLOWED_ORIGINS` | Browser origins allowed for Remote MCP requests with `Origin` | *(none)* |
+| `MCP_RATE_AUTH_FAIL_PER_MIN` | Remote MCP failed auth attempts per IP per minute | `10`        |
+| `MCP_RATE_TOKEN_PER_MIN` | Remote MCP authenticated requests per token per minute | `120`     |
+| `MCP_RATE_READ_PER_MIN` | Remote MCP read tool calls per token per minute | `60`          |
+| `MCP_RATE_WRITE_PER_MIN` | Remote MCP write tool calls per token per minute | `20`        |
 
 Push notification keys are generated on first run and saved to `./data/vapid.json` — nothing to set.
+
+Remote MCP is opt-in:
+
+```bash
+docker compose --profile mcp-http up -d mcp-http
+```
+
+Keep the default Remote MCP bind on localhost or an internal Docker network. Do not expose it
+over public plain HTTP; terminate HTTPS at a reverse proxy and proxy to `/mcp`.
 
 ## Roadmap
 

@@ -5,15 +5,16 @@ application (Claude Desktop, Cursor, Cline, Continue, etc.) read your openGym pr
 explicitly configured with a scoped MCP token, write narrow schedule changes directly against
 your self-hosted `./data` directory.
 
-By default it is read-oriented, runs locally as a stdio process spawned by the LLM client, and
-adds no new container. Write tools require `OPENGYM_MCP_TOKEN` with a narrow scope. The LLM
-never sees passkeys, VAPID keys, or session secrets.
+By default it runs locally as a stdio process spawned by the LLM client and adds no new
+container. Write tools require `OPENGYM_MCP_TOKEN` with a narrow scope. Remote HTTP MCP is
+available separately as an opt-in container profile. The LLM never sees passkeys, VAPID keys,
+or session secrets.
 
 The numbers it answers with are computed by the **same pure functions the React UI uses**
 (`frontend/src/lib/*.js`) — `estimate1RM`, `loadOfWorkouts`, `effectiveRoutine`, etc. — so a
 "what's my bench 1RM?" answer matches the Stats screen exactly.
 
-> Phase 2 is now underway. The fork ships twelve read-only tools plus scoped write tools:
+> The fork ships twelve read-only tools plus scoped write tools:
 > `override_day`, `assign_weekday`, structured `edit_routine` patch ops, `add_bodyweight`
 > structured `log_workout`, `log_freestyle_workout` and `create_custom_exercise`.
 
@@ -66,6 +67,51 @@ For Cursor and other MCP-compatible clients, see the client's MCP docs — the s
 Restart the client; you should see the openGym tools appear with "serving profile \<name\>" on
 the server's stderr.
 
+## Remote HTTP MCP
+
+Remote MCP is opt-in and runs as a separate `mcp-http` compose profile:
+
+```bash
+docker compose --profile mcp-http up -d mcp-http
+```
+
+The container listens on plain HTTP inside the host/Docker network. Do not expose it over
+public plain HTTP. Keep the default localhost bind and terminate HTTPS at Caddy, Traefik,
+nginx, Cloudflare Tunnel, or another reverse proxy:
+
+```text
+Remote MCP client -> HTTPS reverse proxy -> http://127.0.0.1:3010/mcp
+```
+
+Remote HTTP requests must use `Authorization: Bearer ogmcp_...` on every `/mcp` request.
+Tokens are the same MCP tokens created through the openGym API/UI, and revocation takes effect
+on the next request.
+
+Scopes:
+
+| Scope | Remote access |
+|---|---|
+| `state:read` | Required for all read tools |
+| `schedule:write` | `override_day`, `assign_weekday` |
+| `routine:write` | `edit_routine` |
+| `exercise:write` | `create_custom_exercise` |
+| `bodyweight:write` | `add_bodyweight` |
+| `workout:write` | `log_workout`, `log_freestyle_workout` |
+
+Write scopes do not imply read access. Issue combined-scope tokens for clients that need both.
+
+Remote MCP environment variables:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MCP_HTTP_BIND` | `127.0.0.1` | Host bind address used by `docker-compose.yml` |
+| `MCP_HTTP_PORT_PUBLIC` | `3010` | Host port published for the reverse proxy |
+| `MCP_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed when `Origin` is present |
+| `MCP_RATE_AUTH_FAIL_PER_MIN` | `10` | Failed auth attempts per IP per minute |
+| `MCP_RATE_TOKEN_PER_MIN` | `120` | Coarse authenticated requests per token per minute |
+| `MCP_RATE_READ_PER_MIN` | `60` | Read tool calls per token per minute |
+| `MCP_RATE_WRITE_PER_MIN` | `20` | Write tool calls per token per minute |
+
 ## Tools
 
 Twelve read-only tools and seven scoped write tools in this fork:
@@ -111,10 +157,10 @@ dependencies landed in `frontend/`, no public exports changed.
 ## Design constraints honoured
 
 - **One runtime dependency beyond the MCP SDK:** none. No database driver, no HTTP framework.
-- **No new container.** stdio transport is spawned by the LLM client; nothing to add to
-  `docker-compose.yml`.
-- **Scoped write auth.** Read tools still use the local filesystem boundary. Write tools require
-  a hashed long-lived MCP token minted through the API.
+- **Local stdio stays zero-container.** stdio transport is spawned by the LLM client.
+- **Remote HTTP is opt-in.** The optional `mcp-http` compose profile authenticates every
+  request and expects HTTPS at a reverse proxy.
+- **Scoped auth.** Remote reads require `state:read`; writes require narrow write scopes.
 - **No telemetry, no network.** Reads `./data/*.json` and exits when the LLM client
   disconnects.
 
@@ -124,13 +170,14 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-109 MCP tests, including 105 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+153 MCP tests, including 108 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
 progression recommendations, MCP write auth, schedule write dry-run/commit behavior, the
 routine patch write behavior, routine superset linking/unlinking, custom exercise creation,
-bodyweight write behavior, and structured workout logging.
+bodyweight write behavior, structured workout logging, request-scoped HTTP state isolation,
+remote bearer auth, remote scope mapping, rate limiting and `/mcp` HTTP contract behavior.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
@@ -152,8 +199,10 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
   migration/audit tooling.
   See [`docs/MCP_WRITE_ARCHITECTURE.md`](../docs/MCP_WRITE_ARCHITECTURE.md) for the proposed
   token, scope, lock, revision, dry-run and audit design.
-- **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same
-  tool implementations, second transport — the MCP SDK supports both behind one tool registration.
+- **Done (Phase 3):** opt-in Remote MCP over Streamable HTTP-style JSON-RPC at `/mcp`,
+  scoped bearer auth, revocation through existing tokens, request-scoped state, rate limiting
+  and optional `mcp-http` compose profile. Public HTTPS is intentionally handled outside Node
+  by a reverse proxy.
 
 ## License
 

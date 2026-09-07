@@ -1666,35 +1666,75 @@ Pro write AI není tato varianta vhodná.
 
 ---
 
-## Varianta C – budoucí HTTP MCP
+## Varianta C – vzdálené HTTP MCP
 
-Upstream roadmapa počítá s:
+openGym fork má volitelný Remote MCP endpoint jako samostatný `mcp-http` compose profile:
 
-```text
-Streamable HTTP transport
+```bash
+docker compose --profile mcp-http up -d mcp-http
 ```
 
-To je dlouhodobě nejlepší varianta pro vzdáleného agenta.
+Endpoint běží na:
+
+```text
+http://127.0.0.1:3010/mcp
+```
+
+Defaultní bind je lokální. Veřejný provoz musí jít přes HTTPS reverse proxy.
 
 ```text
 AI agent
     │
     │ HTTPS + token
     ▼
-MCP HTTP endpoint
+reverse proxy
     │
     ▼
-openGym services
+http://127.0.0.1:3010/mcp
+    │
+    ▼
+openGym ./data
 ```
 
-Musí však obsahovat:
+Nepublikujte Remote MCP přes veřejné plain HTTP. TLS, doménu, certifikáty a případné IP allowlisty
+řešte v Caddy, Traefik, nginx, Cloudflare Tunnel nebo podobné proxy vrstvě mimo Node proces.
 
-- TLS,
-- token auth,
-- scopes,
-- rate limit,
-- audit,
-- write locking.
+HTTP MCP požadavky musí posílat:
+
+```http
+Authorization: Bearer ogmcp_...
+MCP-Protocol-Version: 2026-07-28
+Mcp-Method: tools/list
+```
+
+Pro `tools/call` musí být `Mcp-Name` stejné jako `params.name`.
+
+Token scopes:
+
+```text
+state:read       všechny read tooly
+schedule:write  override_day, assign_weekday
+routine:write   edit_routine
+exercise:write  create_custom_exercise
+bodyweight:write add_bodyweight
+workout:write   log_workout, log_freestyle_workout
+```
+
+Write scope automaticky neznamená read přístup. Pokud klient potřebuje číst i zapisovat, vytvořte
+token s `state:read` i příslušnými write scopes. Revokace existujícího MCP tokenu zastaví Remote MCP
+na dalším requestu.
+
+Proměnné pro compose:
+
+```text
+MCP_HTTP_BIND=127.0.0.1
+MCP_HTTP_PORT_PUBLIC=3010
+MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://claude.ai
+MCP_RATE_AUTH_FAIL_PER_MIN=10
+MCP_RATE_TOKEN_PER_MIN=120
+MCP_RATE_READ_PER_MIN=60
+MCP_RATE_WRITE_PER_MIN=20
+```
 
 ---
 

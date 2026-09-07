@@ -579,6 +579,8 @@ Do not split first just for neatness; split when it reduces real complexity.
 15. Done: Implement structured `log_freestyle_workout` for routine-less completed workouts.
 16. Done: Implement `create_custom_exercise`.
 17. Done: Add deeper shared workout/set state validation.
+18. Done: Add opt-in Remote MCP HTTP endpoint with scoped bearer auth, request-scoped state,
+    revocation through existing tokens, rate limiting and optional `mcp-http` compose profile.
 
 ## Testing Strategy
 
@@ -631,7 +633,7 @@ log_workout
 create_custom_exercise
 log_freestyle_workout
 deeper shared workout/set validation
-future: remote MCP over Streamable HTTP
+remote MCP over Streamable HTTP-style JSON-RPC
 ```
 
 This keeps the first write tool small and proves the safety model before editing routines, which has a larger blast radius.
