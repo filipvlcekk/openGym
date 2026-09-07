@@ -3,7 +3,7 @@ FROM node:22-alpine
 WORKDIR /app
 
 COPY mcp/package.json mcp/package-lock.json* ./mcp/
-RUN cd mcp && (npm ci --omit=dev 2>/dev/null || npm install --omit=dev) && npm cache clean --force
+RUN cd mcp && npm ci --omit=dev && npm cache clean --force
 
 COPY api ./api
 COPY frontend/src/lib ./frontend/src/lib
