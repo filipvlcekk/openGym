@@ -93,7 +93,7 @@ function readBody(req, limitBytes) {
       if (total > limitBytes) {
         done = true
         reject(Object.assign(new Error('Request body too large.'), { status: 413, code: 'MCP_BODY_TOO_LARGE' }))
-        req.pause()
+        req.resume()
         return
       }
       chunks.push(chunk)
