@@ -1356,7 +1356,7 @@ git commit -m "docs: document remote mcp deployment"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-06-remote-mcp.md`
 
-- [ ] **Step 1: Run API tests**
+- [x] **Step 1: Run API tests**
 
 Run:
 
@@ -1366,7 +1366,9 @@ cd api && npm test
 
 Expected: all pass.
 
-- [ ] **Step 2: Run MCP tests**
+Result: `npm test` in `api` passed 31/31 tests.
+
+- [x] **Step 2: Run MCP tests**
 
 Run:
 
@@ -1376,7 +1378,9 @@ cd mcp && npm test
 
 Expected: all pass.
 
-- [ ] **Step 3: Run MCP loadability**
+Result: `npm test` in `mcp` passed 153/153 tests.
+
+- [x] **Step 3: Run MCP loadability**
 
 Run:
 
@@ -1386,7 +1390,9 @@ cd mcp && npm run check:node-loadable
 
 Expected: all listed modules load, including new HTTP modules.
 
-- [ ] **Step 4: Run Docker verification if available**
+Result: `npm run check:node-loadable` in `mcp` loaded the MCP import graph under plain Node.
+
+- [x] **Step 4: Run Docker verification if available**
 
 Run:
 
@@ -1397,7 +1403,9 @@ docker compose --profile mcp-http build mcp-http
 
 Expected: pass, or document exact reason if Docker/network is unavailable.
 
-- [ ] **Step 5: Manual HTTP smoke test**
+Result: Docker CLI is unavailable in this environment: `zsh:1: command not found: docker`.
+
+- [x] **Step 5: Manual HTTP smoke test**
 
 If local server can run, start:
 
@@ -1434,7 +1442,11 @@ curl -sS http://127.0.0.1:3010/mcp \
 
 Expected: health ok, authenticated MCP response ok, no token appears in logs.
 
-- [ ] **Step 6: Check git status and whitespace**
+Result: started `node src/http.js` against a temporary data dir on `127.0.0.1:3019`;
+`GET /healthz` returned `{"ok":true}` and authenticated `tools/list` returned 19 tools.
+The server log only printed the listen URL.
+
+- [x] **Step 6: Check git status and whitespace**
 
 Run:
 
@@ -1444,6 +1456,9 @@ git status --short --branch
 ```
 
 Expected: clean or only intended plan checkbox updates.
+
+Result: `git diff --check` passed with no output; `git status --short --branch`
+showed only the intended plan update.
 
 - [ ] **Step 7: Commit final plan checkbox update**
 
