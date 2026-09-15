@@ -1472,7 +1472,7 @@ git commit -m "docs: close remote mcp plan"
 **Files:**
 - No code changes unless review finds issues.
 
-- [ ] **Step 1: Request final branch review**
+- [x] **Step 1: Request final branch review**
 
 Ask a read-only reviewer to inspect the full branch against the spec:
 
@@ -1484,9 +1484,16 @@ Ask a read-only reviewer to inspect the full branch against the spec:
 - Docker opt-in safety;
 - docs accuracy.
 
-- [ ] **Step 2: Fix blocking review findings**
+Result: final review found two Medium HTTP boundary issues: missing CORS handling for
+allowed browser clients and missing JSON-RPC envelope validation.
+
+- [x] **Step 2: Fix blocking review findings**
 
 Use `superpowers:receiving-code-review` for any feedback. Fix critical/important issues before merge. Re-run relevant tests.
+
+Result: fixed in `7b4b00c` with CORS preflight/response headers, JSON-RPC envelope validation
+and regression tests. Re-ran `api` tests 31/31, `mcp` tests 159/159,
+`mcp` loadability and `git diff --check`. Re-review reported no findings.
 
 - [ ] **Step 3: Use finishing branch workflow**
 
