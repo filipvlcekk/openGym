@@ -145,6 +145,36 @@ describe('remote MCP HTTP server', () => {
     expect(res.status).toBe(405)
   })
 
+  test('allowed browser preflight returns CORS headers', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://client.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type, mcp-protocol-version, mcp-method, mcp-name'
+      }
+    })
+
+    expect(res.status).toBe(204)
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://client.example')
+    expect(res.headers.get('vary')).toBe('Origin')
+    expect(res.headers.get('access-control-allow-methods')).toContain('POST')
+    expect(res.headers.get('access-control-allow-headers')).toContain('Authorization')
+    expect(res.headers.get('access-control-allow-headers')).toContain('MCP-Protocol-Version')
+  })
+
+  test('allowed browser POST returns CORS origin header', async () => {
+    const token = createToken(dataDir).token
+    const { res } = await postRpc(baseUrl, rpcBody('tools/list'), {
+      token,
+      headers: { origin: 'https://client.example' }
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://client.example')
+    expect(res.headers.get('vary')).toBe('Origin')
+  })
+
   test('POST /mcp without auth returns 401', async () => {
     const { res, json } = await postRpc(baseUrl, rpcBody('tools/list'))
 
@@ -199,6 +229,66 @@ describe('remote MCP HTTP server', () => {
 
     expect(res.status).toBe(400)
     expect(json.error.code).toBe(-32020)
+  })
+
+  test('invalid JSON-RPC version returns invalid request', async () => {
+    const token = createToken(dataDir).token
+    const { res, json } = await postRpc(baseUrl, {
+      jsonrpc: '1.0',
+      id: 1,
+      method: 'tools/list',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION
+        }
+      }
+    }, { token })
+
+    expect(res.status).toBe(400)
+    expect(json.error.code).toBe(-32600)
+    expect(json.error.data.code).toBe('MCP_INVALID_REQUEST')
+  })
+
+  test.each([
+    ['batch requests', [{
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION
+        }
+      }
+    }]],
+    ['primitive params', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: 'bad'
+    }],
+    ['object ids', {
+      jsonrpc: '2.0',
+      id: { nested: true },
+      method: 'tools/list',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION
+        }
+      }
+    }]
+  ])('invalid JSON-RPC envelope rejects %s', async (_label, body) => {
+    const token = createToken(dataDir).token
+    const { res, json } = await postRaw(baseUrl, JSON.stringify(body), {
+      headers: {
+        authorization: `Bearer ${token}`,
+        'MCP-Protocol-Version': PROTOCOL_VERSION,
+        'Mcp-Method': 'tools/list'
+      }
+    })
+
+    expect(res.status).toBe(400)
+    expect(json.error.code).toBe(-32600)
+    expect(json.error.data.code).toBe('MCP_INVALID_REQUEST')
   })
 
   test('missing protocol meta returns header validation error', async () => {

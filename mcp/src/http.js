@@ -82,6 +82,27 @@ function validateOrigin(req, options) {
   return { status: 403, code: 'MCP_ORIGIN_FORBIDDEN', message: 'Origin is not allowed.' }
 }
 
+function corsHeaders(req, options, preflight = false) {
+  const origin = req.headers.origin
+  if (!origin || !allowedOrigins(options).includes(origin)) return {}
+  const headers = {
+    'access-control-allow-origin': origin,
+    vary: 'Origin'
+  }
+  if (preflight) {
+    headers['access-control-allow-methods'] = 'POST, OPTIONS'
+    headers['access-control-allow-headers'] = [
+      'Authorization',
+      'Content-Type',
+      'Accept',
+      'MCP-Protocol-Version',
+      'Mcp-Method',
+      'Mcp-Name'
+    ].join(', ')
+  }
+  return headers
+}
+
 function readBody(req, limitBytes) {
   return new Promise((resolve, reject) => {
     let total = 0
@@ -116,6 +137,36 @@ function protocolError(id, message, extra = {}) {
     status: 400,
     body: jsonRpcError(id, HEADER_ERROR, message, { code: 'MCP_HEADER_MISMATCH', ...extra })
   }
+}
+
+function envelopeId(body) {
+  return ['string', 'number'].includes(typeof body?.id) || body?.id === null ? body.id : null
+}
+
+function invalidEnvelope(body, message) {
+  return {
+    status: 400,
+    body: jsonRpcError(envelopeId(body), INVALID_REQUEST, message, { code: 'MCP_INVALID_REQUEST' })
+  }
+}
+
+function validateJsonRpcEnvelope(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return invalidEnvelope(body, 'JSON-RPC request must be a single object.')
+  }
+  if (body.jsonrpc !== '2.0') {
+    return invalidEnvelope(body, 'JSON-RPC version must be 2.0.')
+  }
+  if (typeof body.method !== 'string' || !body.method) {
+    return invalidEnvelope(body, 'JSON-RPC method must be a non-empty string.')
+  }
+  if ('params' in body && (!body.params || typeof body.params !== 'object' || Array.isArray(body.params))) {
+    return invalidEnvelope(body, 'JSON-RPC params must be an object when present.')
+  }
+  if ('id' in body && !['string', 'number'].includes(typeof body.id) && body.id !== null) {
+    return invalidEnvelope(body, 'JSON-RPC id must be a string, number or null when present.')
+  }
+  return null
 }
 
 function validateProtocol(req, body) {
@@ -172,11 +223,11 @@ function operationRateLimit(scope, context, limiters) {
   return limiters.write.check(`write:${context.token.id}`)
 }
 
-function rateLimited(res, id, result) {
+function rateLimited(res, id, result, headers = {}) {
   sendRpcError(res, 429, id, -32029, 'Rate limit exceeded.', {
     code: 'MCP_RATE_LIMITED',
     retryAfter: result.retryAfter
-  }, { 'retry-after': String(result.retryAfter) })
+  }, { ...headers, 'retry-after': String(result.retryAfter) })
 }
 
 function inputSchemaForTool(tool) {
@@ -242,19 +293,19 @@ function parseToolArguments(tool, args) {
   }
 }
 
-async function handleRpc(req, res, body, context, limiters) {
+async function handleRpc(req, res, body, context, limiters, responseHeaders = {}) {
   const id = body?.id ?? null
   const tokenLimit = tokenRateLimit(context, limiters)
-  if (!tokenLimit.ok) return rateLimited(res, id, tokenLimit)
+  if (!tokenLimit.ok) return rateLimited(res, id, tokenLimit, responseHeaders)
 
   if (body.method === 'tools/list') {
-    return sendJson(res, 200, jsonRpcResult(id, toolsListResult()))
+    return sendJson(res, 200, jsonRpcResult(id, toolsListResult()), responseHeaders)
   }
   if (body.method !== 'tools/call') {
     return sendRpcError(res, 404, id, METHOD_NOT_FOUND, 'Method not found.', {
       code: 'MCP_METHOD_NOT_FOUND',
       method: body.method
-    })
+    }, responseHeaders)
   }
 
   const toolName = body.params?.name
@@ -263,10 +314,10 @@ async function handleRpc(req, res, body, context, limiters) {
     return sendRpcError(res, scoped.status, id, -32001, scoped.message, {
       code: scoped.code,
       required_scope: scoped.required_scope || null
-    })
+    }, responseHeaders)
   }
   const opLimit = operationRateLimit(scoped.requiredScope, context, limiters)
-  if (!opLimit.ok) return rateLimited(res, id, opLimit)
+  if (!opLimit.ok) return rateLimited(res, id, opLimit, responseHeaders)
 
   const tool = TOOLS.find(t => t.name === toolName)
   const parsedArgs = parseToolArguments(tool, body.params?.arguments)
@@ -274,17 +325,17 @@ async function handleRpc(req, res, body, context, limiters) {
     return sendRpcError(res, 400, id, INVALID_PARAMS, parsedArgs.message, {
       code: 'MCP_INVALID_PARAMS',
       issues: parsedArgs.issues
-    })
+    }, responseHeaders)
   }
   try {
     const result = tool.handler(parsedArgs.args, context)
-    return sendJson(res, 200, jsonRpcResult(id, toolResult(result)))
+    return sendJson(res, 200, jsonRpcResult(id, toolResult(result)), responseHeaders)
   } catch (err) {
     const code = err.code || 'ERROR'
     return sendJson(res, 200, jsonRpcResult(id, {
       isError: true,
       content: [{ type: 'text', text: `${code}: ${err.message}` }]
-    }))
+    }), responseHeaders)
   }
 }
 
@@ -300,8 +351,18 @@ export function createHttpMcpServer(options = {}) {
     if (req.url !== '/mcp') {
       return sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Not found.' } })
     }
+    if (req.method === 'OPTIONS') {
+      const originError = validateOrigin(req, options)
+      if (originError) {
+        return sendRpcError(res, originError.status, null, -32001, originError.message, {
+          code: originError.code
+        })
+      }
+      res.writeHead(204, corsHeaders(req, options, true))
+      return res.end()
+    }
     if (req.method !== 'POST') {
-      res.writeHead(405, { allow: 'POST' })
+      res.writeHead(405, { allow: 'POST, OPTIONS' })
       return res.end()
     }
 
@@ -311,6 +372,7 @@ export function createHttpMcpServer(options = {}) {
         code: originError.code
       })
     }
+    const responseHeaders = corsHeaders(req, options)
 
     let body
     try {
@@ -320,27 +382,32 @@ export function createHttpMcpServer(options = {}) {
       const bodyError = err.code === 'MCP_BODY_TOO_LARGE'
       return sendRpcError(res, status, null, INVALID_REQUEST, bodyError ? err.message : 'Invalid JSON.', {
         code: bodyError ? err.code : 'MCP_INVALID_JSON'
-      }, bodyError ? { connection: 'close' } : {})
+      }, { ...responseHeaders, ...(bodyError ? { connection: 'close' } : {}) })
+    }
+
+    const envelopeFailure = validateJsonRpcEnvelope(body)
+    if (envelopeFailure) {
+      return sendJson(res, envelopeFailure.status, envelopeFailure.body, responseHeaders)
     }
 
     const protocolFailure = validateProtocol(req, body)
     if (protocolFailure) {
-      return sendJson(res, protocolFailure.status, protocolFailure.body)
+      return sendJson(res, protocolFailure.status, protocolFailure.body, responseHeaders)
     }
 
     const auth = authenticateHttpRequest(req.headers, { dataDir })
     if (!auth.ok) {
       const failedLimit = authFailureRateLimit(req, limiters, options)
-      if (!failedLimit.ok) return rateLimited(res, body.id, failedLimit)
-      return sendRpcError(res, auth.status, body.id, -32001, auth.error.message, auth.error)
+      if (!failedLimit.ok) return rateLimited(res, body.id, failedLimit, responseHeaders)
+      return sendRpcError(res, auth.status, body.id, -32001, auth.error.message, auth.error, responseHeaders)
     }
 
     try {
-      return await handleRpc(req, res, body, auth.context, limiters)
+      return await handleRpc(req, res, body, auth.context, limiters, responseHeaders)
     } catch (err) {
       return sendRpcError(res, 500, body.id, INTERNAL_ERROR, 'Internal MCP server error.', {
         code: 'MCP_INTERNAL_ERROR'
-      })
+      }, responseHeaders)
     }
   })
 }
