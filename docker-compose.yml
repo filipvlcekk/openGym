@@ -27,10 +27,16 @@ services:
     image: ghcr.io/duartesantos8/opengym-api:latest
     build: ./api
     restart: unless-stopped
-    env_file: .env
     environment:
       - PORT=3000            # internal port (nginx proxies here) — do not change
       - DATA_DIR=/data
+      - RP_ID=${RP_ID:-localhost}
+      - ORIGIN=${ORIGIN:-http://localhost:8080}
+      - RP_NAME=${RP_NAME:-openGym}
+      - ADMIN_UIDS=${ADMIN_UIDS:-}
+      - INVITE_ONLY=${INVITE_ONLY:-}
+      - SESSION_DAYS=${SESSION_DAYS:-90}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     volumes:
       - ./data:/data         # users, passkeys, per-user state, session secret — BACK THIS UP
 
@@ -40,7 +46,7 @@ services:
     image: ghcr.io/duartesantos8/opengym-web:latest
     build:
       context: .
-      dockerfile: web/Dockerfile
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       media:
@@ -61,7 +67,6 @@ services:
       dockerfile: mcp/Dockerfile
     restart: unless-stopped
     profiles: ["mcp-http"]
-    env_file: .env
     environment:
       - OPENGYM_DATA=/data
       - MCP_HTTP_HOST=0.0.0.0
