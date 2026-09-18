@@ -1495,7 +1495,7 @@ Result: fixed in `7b4b00c` with CORS preflight/response headers, JSON-RPC envelo
 and regression tests. Re-ran `api` tests 31/31, `mcp` tests 159/159,
 `mcp` loadability and `git diff --check`. Re-review reported no findings.
 
-- [ ] **Step 3: Use finishing branch workflow**
+- [x] **Step 3: Use finishing branch workflow**
 
 Use `superpowers:finishing-a-development-branch`.
 
@@ -1505,7 +1505,9 @@ Expected preferred option, based on prior project workflow:
 Merge back to main locally
 ```
 
-- [ ] **Step 4: Post-merge verification on `main`**
+Result: fast-forward merged `phase-3-remote-mcp` into local `main`.
+
+- [x] **Step 4: Post-merge verification on `main`**
 
 Run:
 
@@ -1517,3 +1519,7 @@ docker compose config
 ```
 
 Expected: pass, except Docker commands only if available.
+
+Result: on local `main`, `api` tests passed 31/31, `mcp` tests passed 159/159,
+and MCP loadability passed. `docker compose config` could not run because Docker CLI is not
+installed in this environment: `zsh:1: command not found: docker`.
