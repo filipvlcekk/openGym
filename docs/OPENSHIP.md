@@ -95,6 +95,36 @@ Node import checks passed. Production dependency audits reported zero findings
 for MCP and frontend; remaining development/mobile tooling findings were not
 updated as part of this deployment. A read-only review found no blocking issues.
 
-Real passkey registration/login, an authenticated production MCP call and
-third-party MCP client compatibility still require a user's profile/token.
+Real passkey registration/login and other third-party clients were not exercised
+by this deployment check. Authenticated Codex verification is recorded below.
 Automatic backup scheduling and restore were not exercised.
+
+## Codex verification — 2026-11-03
+
+Fixed standard MCP initialization in commit `157c9b2` and deployed it as
+`dep_snWvpy_yyV99C2g5`. The deployment rebuilt only `mcp-http`; API and web were
+carried forward without restarting. The media initializer ran again successfully.
+GitHub's anonymous API limit blocked the usual source lookup, so the same commit
+was cloned with Git and built through Openship's local-source workflow. The
+project's GitHub source configuration was restored after deployment.
+
+Verified with the installed **Codex CLI 0.166.0**, through its app-server protocol
+and real public HTTPS endpoint, using an ephemeral thread and a temporary
+`state:read` token:
+
+- Initialization succeeded and all 19 tools were discovered.
+- `get_week_plan` reached the authenticated profile. The account had no synced
+  state file yet, and returned the existing `no synced state yet` domain response;
+  no workout data or plan was fabricated for the test.
+- `override_day` with the read-only token was rejected with a scope error.
+- The temporary token was revoked. A subsequent public HTTPS request returned
+  401 `TOKEN_REVOKED`.
+
+The token was transferred encrypted and was not printed. The verification did not
+add a permanent MCP entry to the user's Codex configuration or modify training
+data. Create/save a routine in openGym to sync the first training state. A permanent
+connection still needs its own token and Codex configuration, as in `mcp/README.md`.
+
+All 178 MCP tests, Node import checks and the production dependency audit passed.
+An independent review found no blocking issue. No OAuth or frontend settings
+changes were needed for this compatibility fix.
