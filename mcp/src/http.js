@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import http from 'node:http'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 
 import { authenticateHttpRequest } from './http-auth.js'
 import { createFixedWindowLimiter } from './rate-limit.js'
-import { isReadTool, requiredScopeForTool } from './tool-scopes.js'
+import { createOpenGymMcpServer } from './server.js'
+import { requiredScopeForTool } from './tool-scopes.js'
 import { TOOLS } from './tools.js'
 
 export const MCP_PROTOCOL_VERSION = '2026-07-28'
@@ -293,11 +295,8 @@ function parseToolArguments(tool, args) {
   }
 }
 
-async function handleRpc(req, res, body, context, limiters, responseHeaders = {}) {
+async function handleRpc(res, body, context, responseHeaders = {}) {
   const id = body?.id ?? null
-  const tokenLimit = tokenRateLimit(context, limiters)
-  if (!tokenLimit.ok) return rateLimited(res, id, tokenLimit, responseHeaders)
-
   if (body.method === 'tools/list') {
     return sendJson(res, 200, jsonRpcResult(id, toolsListResult()), responseHeaders)
   }
@@ -309,16 +308,6 @@ async function handleRpc(req, res, body, context, limiters, responseHeaders = {}
   }
 
   const toolName = body.params?.name
-  const scoped = verifyScope(toolName, context)
-  if (!scoped.ok) {
-    return sendRpcError(res, scoped.status, id, -32001, scoped.message, {
-      code: scoped.code,
-      required_scope: scoped.required_scope || null
-    }, responseHeaders)
-  }
-  const opLimit = operationRateLimit(scoped.requiredScope, context, limiters)
-  if (!opLimit.ok) return rateLimited(res, id, opLimit, responseHeaders)
-
   const tool = TOOLS.find(t => t.name === toolName)
   const parsedArgs = parseToolArguments(tool, body.params?.arguments)
   if (!parsedArgs.ok) {
@@ -390,9 +379,13 @@ export function createHttpMcpServer(options = {}) {
       return sendJson(res, envelopeFailure.status, envelopeFailure.body, responseHeaders)
     }
 
-    const protocolFailure = validateProtocol(req, body)
-    if (protocolFailure) {
-      return sendJson(res, protocolFailure.status, protocolFailure.body, responseHeaders)
+    const customProtocol = 'mcp-method' in req.headers || 'mcp-name' in req.headers ||
+      Object.hasOwn(body.params?._meta || {}, 'io.modelcontextprotocol/protocolVersion')
+    if (customProtocol) {
+      const protocolFailure = validateProtocol(req, body)
+      if (protocolFailure) {
+        return sendJson(res, protocolFailure.status, protocolFailure.body, responseHeaders)
+      }
     }
 
     const auth = authenticateHttpRequest(req.headers, { dataDir })
@@ -403,8 +396,34 @@ export function createHttpMcpServer(options = {}) {
     }
 
     try {
-      return await handleRpc(req, res, body, auth.context, limiters, responseHeaders)
+      const tokenLimit = tokenRateLimit(auth.context, limiters)
+      if (!tokenLimit.ok) return rateLimited(res, body.id, tokenLimit, responseHeaders)
+
+      if (body.method === 'tools/call') {
+        const scoped = verifyScope(body.params?.name, auth.context)
+        if (!scoped.ok) {
+          return sendRpcError(res, scoped.status, body.id, -32001, scoped.message, {
+            code: scoped.code,
+            required_scope: scoped.required_scope || null
+          }, responseHeaders)
+        }
+        const opLimit = operationRateLimit(scoped.requiredScope, auth.context, limiters)
+        if (!opLimit.ok) return rateLimited(res, body.id, opLimit, responseHeaders)
+      }
+
+      if (customProtocol) return await handleRpc(res, body, auth.context, responseHeaders)
+
+      const mcpServer = createOpenGymMcpServer({ context: auth.context })
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true
+      })
+      res.once('close', () => { mcpServer.close().catch(() => {}) })
+      for (const [name, value] of Object.entries(responseHeaders)) res.setHeader(name, value)
+      await mcpServer.connect(transport)
+      return await transport.handleRequest(req, res, body)
     } catch (err) {
+      if (res.headersSent) return res.destroy()
       return sendRpcError(res, 500, body.id, INTERNAL_ERROR, 'Internal MCP server error.', {
         code: 'MCP_INTERNAL_ERROR'
       }, responseHeaders)

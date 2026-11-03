@@ -55,10 +55,12 @@ open; no initial administrator is assigned automatically. See
 `SELF_HOSTING.md` for configuring `ADMIN_UIDS` and invite-only registration.
 Keep the hostname stable because changing `RP_ID` invalidates existing passkeys.
 
-Create MCP tokens from signed-in Settings. Reads require `state:read`, and writes
-require the corresponding write scopes. Remote HTTP currently implements
-`tools/list` and `tools/call` with protocol `2026-07-28`; it does not implement
-OAuth discovery or `initialize`. Verify the intended client's compatibility.
+Create MCP tokens through the signed-in API (`POST /api/mcp/tokens`); the frontend
+does not yet have token management controls. Reads require `state:read`, and writes
+require the corresponding write scopes. Standard stateless Streamable HTTP supports
+`initialize`, tool discovery and calls with the SDK's 2025 protocol versions. The
+custom `2026-07-28` request format remains supported. OAuth is not implemented.
+See `mcp/README.md` for Codex bearer-token configuration.
 
 Redeploy the saved project from `deploy/openship` after reviewing changes. Keep
 the service overrides and named volumes; do not substitute upstream prebuilt

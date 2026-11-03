@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { z } from 'zod'
 
 import { TOOLS } from './tools.js'
 
@@ -9,10 +10,9 @@ export function createOpenGymMcpServer(options = {}) {
   })
 
   for (const tool of TOOLS) {
-    server.tool(
+    server.registerTool(
       tool.name,
-      tool.description,
-      tool.schema,
+      { description: tool.description, inputSchema: z.object(tool.schema || {}).strict() },
       async (params) => {
         try {
           const result = tool.handler(params || {}, options.context)

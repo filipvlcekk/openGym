@@ -84,8 +84,28 @@ Remote MCP client -> HTTPS reverse proxy -> http://127.0.0.1:3010/mcp
 ```
 
 Remote HTTP requests must use `Authorization: Bearer ogmcp_...` on every `/mcp` request.
-Tokens are the same MCP tokens created through the openGym API/UI, and revocation takes effect
-on the next request.
+Tokens are created through the authenticated openGym API (`POST /api/mcp/tokens`),
+and revocation takes effect on the next request. Token management is not yet exposed
+in the frontend Settings screen.
+
+### Codex
+
+The endpoint supports standard stateless Streamable HTTP, including initialization,
+typed tool discovery and tool calls, using the installed SDK's supported 2025 protocol
+versions. The custom `2026-07-28` request format remains available for existing clients.
+
+Make a token with `state:read` available as `OPENGYM_MCP_TOKEN` in the Codex process
+environment, then register the server:
+
+```bash
+codex mcp add opengym \
+  --url https://opengym-mcp.ship.saola.cz/mcp \
+  --bearer-token-env-var OPENGYM_MCP_TOKEN
+```
+
+For another self-hosted instance, replace the hostname with its own HTTPS endpoint.
+Add narrow write scopes only when you want Codex to edit that profile. This connection
+uses bearer authentication; `codex mcp login` is for OAuth servers and is not needed here.
 
 Scopes:
 
@@ -170,14 +190,15 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-153 MCP tests, including 108 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+178 MCP tests, including 108 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
 progression recommendations, MCP write auth, schedule write dry-run/commit behavior, the
 routine patch write behavior, routine superset linking/unlinking, custom exercise creation,
 bodyweight write behavior, structured workout logging, request-scoped HTTP state isolation,
-remote bearer auth, remote scope mapping, rate limiting and `/mcp` HTTP contract behavior.
+remote bearer auth, remote scope mapping, rate limiting, legacy `/mcp` HTTP contracts,
+and standard SDK client initialization, typed discovery, user isolation and scope enforcement.
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have
 their own 92 tests in `frontend/src/lib/*.test.js`.
