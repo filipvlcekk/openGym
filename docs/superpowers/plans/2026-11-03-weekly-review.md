@@ -43,6 +43,13 @@ progress or deload assessment was made.
 Files: `mcp/README.md`, `docs/openGym_AI_Coach_MCP_dokumentace.md`, `docs/OPENSHIP.md`, this plan.
 
 - [x] Mark Phase 2/3 implementation complete and describe the limited Phase 4 milestone; retain historical verification records.
-- [ ] Review, run `git diff --check`, commit and push only intended files.
-- [ ] Deploy the MCP correction through the existing Openship project with persistent volumes preserved.
-- [ ] Verify authenticated summaries, document results and remaining automatic coaching work.
+- [x] Review, run `git diff --check`, commit and push only intended files.
+- [x] Deploy the MCP correction through the existing Openship project with persistent volumes preserved.
+- [x] Verify authenticated summaries, document results and remaining automatic coaching work.
+
+Result: independent review found no blockers; updated README counts to 182/112.
+Commit `1258233` deployed as `dep_UBrf3g3uCsvIDYLB`, status `ready`. API and web
+containers were carried forward; the existing volumes were retained. A synthetic
+in-memory check in the deployed MCP image returned RPE 8 for five rated RPE-8
+sets. Authenticated production summary and public HTTPS health passed. No live
+profile was changed. Automatic reports and alerts remain outside this milestone.

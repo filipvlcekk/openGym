@@ -128,3 +128,26 @@ connection still needs its own token and Codex configuration, as in `mcp/README.
 All 178 MCP tests, Node import checks and the production dependency audit passed.
 An independent review found no blocking issue. No OAuth or frontend settings
 changes were needed for this compatibility fix.
+
+## On-demand weekly review — 2026-11-03
+
+The first Phase 4 milestone is a reusable Codex skill, not an automatic reporting
+job. Source: `.agents/skills/opengym-weekly-review/SKILL.md`; an identical validated
+copy is installed at `~/.codex/skills/opengym-weekly-review/SKILL.md` on this Mac.
+Invoke it in a new Codex session as `$opengym-weekly-review` or ask for an openGym
+weekly coaching review. It uses the existing read-only connection and scopes.
+
+Commit `1258233` also corrects `training_summary.effort.avg` for RPE profiles using
+the shared frontend scale conversion. No state migration is needed. The prior
+behavior labeled canonical RIR as RPE; regression tests cover mixed recorded
+scales, explicit RIR/RPE, imported-history fallback and insufficient ratings.
+
+The complete MCP suite passed 182 tests and Node import checks. Skill validation,
+a sparse-data forward test and live read calls passed. No training data was
+modified. Remaining Phase 4 work includes automatic reporting and notifications;
+historical adherence cannot be inferred from the current weekday schedule.
+
+Deployment `dep_UBrf3g3uCsvIDYLB` reached `ready` from commit `1258233`.
+API and web containers were carried forward with existing data volumes. The
+deployed MCP image passed a synthetic, in-memory RPE-8 average check; authenticated
+production `training_summary` and public HTTPS `/healthz` passed afterward.
