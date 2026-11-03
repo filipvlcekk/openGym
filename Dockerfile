@@ -7,6 +7,8 @@
 # QEMU — and QEMU-emulated npm installs are known to corrupt esbuild/rollup's platform-
 # specific native binaries, which is what breaks `vite build` with unrelated-looking
 # module-resolution errors.
+# Legacy builders need BUILDPLATFORM passed explicitly as a build argument.
+ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
