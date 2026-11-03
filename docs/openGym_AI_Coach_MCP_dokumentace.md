@@ -1,7 +1,7 @@
 # openGym + AI Coach přes MCP
 
 **Technická dokumentace a návrh implementace**
-**Stav ověřen k:** 24. 8. 2026
+**Původní návrh:** 24. 8. 2026; stav MCP a roadmapy aktualizován 3. 11. 2026.
 **Cílový projekt:** `filipvlcekk/openGym`
 **Upstream:** `DuarteSantos/openGym` na Gitea; původní GitHub `DuarteSantos8/openGym` je aktuálně offline.
 
@@ -2127,7 +2127,7 @@ Stav k 2026-09-06:
 - hotovo: `create_custom_exercise` pro vytvoření jednoho vlastního cviku se `exercise:write`, dry-run, revision checkem a audit commitem,
 - hotovo: sdílená strukturální validace state ve `state-service` před zápisem a auditem,
 - hotovo: hlubší sdílená validace workout/set dat pro metadata workoutů, entries, sety, targety a `exWeights`, bez striktní migrace historických dat,
-- zbývá: žádný další stdio write tool v aktuální Phase 2 roadmapě; další větší etapa je remote HTTP MCP.
+- zbývá: žádný další stdio write tool v aktuální Phase 2 roadmapě; remote HTTP MCP je také dokončené (viz Phase 3).
 
 Současně:
 
@@ -2159,7 +2159,7 @@ unlink_superset
 
 ## Phase 3 – Remote MCP
 
-Implementovat:
+Hotovo a nasazeno na Openshipu, včetně ověřeného připojení Codexu:
 
 ```text
 Streamable HTTP MCP
@@ -2187,6 +2187,14 @@ weight trend review
 ```
 
 Proaktivní funkce by neměly automaticky přepisovat plán bez schválení.
+
+První zvolený milestone (3. 11. 2026): týdenní přehled **na vyžádání v Codexu**.
+Skill `.agents/skills/opengym-weekly-review/SKILL.md` používá existující
+`training_summary`, `detect_stalls` a `get_week_plan`; podrobnosti čte jen podle
+potřeby. Nezavádí nový MCP tool, plánovač ani automatické změny dat.
+Aktuální rozpis nepovažuje za historii plánu a z chybějících dat neodvozuje
+vynechané tréninky ani potřebu deloadu. Automatické reporty a upozornění zbývají.
+Návrh a plán jsou v `docs/superpowers/{specs,plans}/2026-11-03-weekly-review*.md`.
 
 ---
 

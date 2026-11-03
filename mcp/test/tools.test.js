@@ -811,6 +811,36 @@ describe('training_summary', () => {
       .toBe(r.muscle_coverage.muscle_count)
   })
 
+  test.each([
+    ['rir', 'RIR', 2],
+    ['rpe', 'RPE', 8],
+    ['none', 'RPE', 8]
+  ])('reports mixed-history average in the displayed scale with effort %s', (setting, scale, avg) => {
+    S.effort = setting
+    S.workouts = [workout('mixed-effort', FAKE_TODAY_ISO, 'push', 'Push Day', [
+      entry('0426', { id: '0426' }, [
+        { rir: 0 }, { rir: 2 }, { rpe: 8 }, { rpe: 7 }, { rpe: 7 }
+      ])
+    ])]
+    _seedStateForTests(S)
+
+    expect(call('training_summary', { period: 'week' }).effort).toEqual({
+      scale, done_sets: 5, rated_sets: 5, avg, hard_pct: 1
+    })
+  })
+
+  test('keeps an RPE average null when fewer than five sets are rated', () => {
+    S.effort = 'rpe'
+    S.workouts = [workout('sparse-effort', FAKE_TODAY_ISO, 'push', 'Push Day', [
+      entry('0426', { id: '0426' }, [{ rpe: 8 }, { rpe: 8 }, { rpe: 8 }, { rpe: 8 }, {}])
+    ])]
+    _seedStateForTests(S)
+
+    expect(call('training_summary', { period: 'week' }).effort).toEqual({
+      scale: 'RPE', done_sets: 5, rated_sets: 4, avg: null, hard_pct: null
+    })
+  })
+
   test('week is a narrower window than 6w, and 6w is no larger than all', () => {
     const week = call('training_summary', { period: 'week' })
     const six = call('training_summary', { period: '6w' })

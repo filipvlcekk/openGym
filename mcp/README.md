@@ -190,7 +190,7 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-178 MCP tests, including 108 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+182 MCP tests, including 112 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
@@ -208,7 +208,7 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
 - **Done (Phase 1):** read-only stdio, 8 base tools, direct `./data` access.
 - **Done (Phase 1.5):** `progression_next`, `exercise_history`, `training_summary`
   and `detect_stalls` tools for better coaching reads. No new deps; small surface area.
-- **In progress (Phase 2):** read+write over stdio. Done so far: long-lived token auth,
+- **Done (Phase 2 and 2.5):** read+write over stdio. Implemented: long-lived token auth,
   `./data/tokens.json`, per-user state locks, `_revision` conflict checks, scrubbed
   `audit.log`, `override_day`, `assign_weekday`, and structured `edit_routine` patch ops for
   routine policy, existing exercise targets, add/remove/reorder exercise changes and direct
@@ -224,6 +224,12 @@ their own 92 tests in `frontend/src/lib/*.test.js`.
   scoped bearer auth, revocation through existing tokens, request-scoped state, rate limiting
   and optional `mcp-http` compose profile. Public HTTPS is intentionally handled outside Node
   by a reverse proxy.
+- **Phase 4, first milestone:** on-demand weekly coaching review through the
+  `opengym-weekly-review` Codex skill in `.agents/skills/`. It reuses existing
+  read tools; it does not add another MCP tool or an automatic reporting job.
+  Ask Codex: "Use $opengym-weekly-review to review my training week."
+  Automatic alerts, delivery scheduling and historical schedule adherence remain
+  future work.
 
 ## License
 

@@ -17,7 +17,7 @@ import {
   estimate1RM, best1RM, bestSetOf, e1rmSeries, DEFAULT_FORMULA, REP_CAP
 } from '../../frontend/src/lib/onerm.js'
 import { loadOfWorkouts, rankOf, levelsOf } from '../../frontend/src/lib/muscles.js'
-import { displayScale, effortSummary, scaleName } from '../../frontend/src/lib/effort.js'
+import { displayScale, effortSummary, scaleName, toScale } from '../../frontend/src/lib/effort.js'
 import { uid } from '../../frontend/src/lib/format.js'
 import { POLICIES, nextPrescription } from '../../frontend/src/lib/progression.js'
 
@@ -1502,6 +1502,7 @@ export const trainingSummary = {
     const range = periodRange(period)
     const workouts = (S.workouts || []).filter(w => inDateRange(w.d, range))
     const effort = effortSummary({ ...S, workouts }, 0)
+    const effortScale = displayScale(S)
 
     return {
       period,
@@ -1515,10 +1516,10 @@ export const trainingSummary = {
       },
       bodyweight: bodyweightSummary(S, range),
       effort: {
-        scale: scaleName(displayScale(S)),
+        scale: scaleName(effortScale),
         done_sets: effort.done,
         rated_sets: effort.rated,
-        avg: nullableRound1(effort.avg),
+        avg: toScale(effortScale, effort.avg),
         hard_pct: nullableRound1(effort.hardPct)
       },
       muscle_coverage: muscleCoverageSummary(workouts)
