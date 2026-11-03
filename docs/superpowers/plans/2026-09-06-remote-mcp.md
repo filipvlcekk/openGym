@@ -1460,12 +1460,14 @@ Expected: clean or only intended plan checkbox updates.
 Result: `git diff --check` passed with no output; `git status --short --branch`
 showed only the intended plan update.
 
-- [ ] **Step 7: Commit final plan checkbox update**
+- [x] **Step 7: Commit final plan checkbox update**
 
 ```bash
 git add docs/superpowers/plans/2026-09-06-remote-mcp.md
 git commit -m "docs: close remote mcp plan"
 ```
+
+Result: committed as `5a73fb4`; the checkbox was reconciled on 2026-11-03.
 
 ### Task 14: Final Review And Local Merge
 
@@ -1523,3 +1525,18 @@ Expected: pass, except Docker commands only if available.
 Result: on local `main`, `api` tests passed 31/31, `mcp` tests passed 159/159,
 and MCP loadability passed. `docker compose config` could not run because Docker CLI is not
 installed in this environment: `zsh:1: command not found: docker`.
+
+### Follow-up deployment verification — 2026-11-03
+
+The full stack was source-built and deployed on Openship's Docker server from
+branch `deploy/openship`, commit `2d7f9b9`. This exposed and fixed missing API
+modules in `api/Dockerfile` and the legacy builder's missing `BUILDPLATFORM`
+argument. MCP production dependencies were updated to patched versions; tests
+remain 159/159 and the production dependency audit reports zero findings.
+
+Deployment `dep_7REfNDr6ZbB0koWu` reached `ready`. Public HTTPS health checks,
+tokenless RPC rejection, CORS, frontend assets, exercise media and shared
+persistent volumes were verified. This verifies the actual server-side image
+builds and running stack; it is not a local `docker compose build` run.
+Configuration, URLs and remaining user-client checks are recorded in
+`docs/OPENSHIP.md`.

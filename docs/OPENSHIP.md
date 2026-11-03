@@ -63,3 +63,36 @@ OAuth discovery or `initialize`. Verify the intended client's compatibility.
 Redeploy the saved project from `deploy/openship` after reviewing changes. Keep
 the service overrides and named volumes; do not substitute upstream prebuilt
 images. Auto-deploy is not enabled.
+
+## Verified deployment — 2026-11-03
+
+Deployment `dep_7REfNDr6ZbB0koWu` reached `ready` from commit
+`2d7f9b92e9ed7dd5eb23a84c1370aee84f47d902`. All four service deployment
+steps succeeded. API, web and MCP stay running; the media initializer exited 0.
+Both hostnames have active, publicly trusted TLS certificates. The app hostname
+is the project's primary domain, and HTTP redirects to HTTPS.
+
+Verified from outside the server:
+
+- App HTML and built JavaScript return 200 with the expected content types.
+- `/api/health` returns `{"ok":true,"users":0}` on the fresh instance.
+- `/api/me` rejects an unsigned request with 401.
+- `/api/register/options` returns the configured passkey RP ID. The smoke check
+  did not complete registration or create a user.
+- A JPEG and GIF from the shared media volumes return 200 as images.
+- MCP `/healthz` returns `{"ok":true}`.
+- A correctly formed tokenless MCP RPC returns 401 `MCP_AUTH_REQUIRED`.
+- CORS preflight permits the configured app origin.
+
+Docker inspection confirmed API and MCP mount the same persistent
+`openship-opengym-opengym-data` volume. The two media volumes are shared between
+the initializer and web, and mounted read-only in web.
+
+API tests passed 31/31. MCP tests passed 159/159 on Node 22 and 24, and all 16
+Node import checks passed. Production dependency audits reported zero findings
+for MCP and frontend; remaining development/mobile tooling findings were not
+updated as part of this deployment. A read-only review found no blocking issues.
+
+Real passkey registration/login, an authenticated production MCP call and
+third-party MCP client compatibility still require a user's profile/token.
+Automatic backup scheduling and restore were not exercised.
