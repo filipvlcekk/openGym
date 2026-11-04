@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-03-confirmed-training-plan-design.md`.
 
-**Status (2026-11-04):** implemented and locally verified; rollout in progress. No live training plan saved.
+**Status (2026-11-04):** implemented, reviewed, tested and deployed from `0f5c551`. Codex read/preview verified; no live training plan saved.
 
 ## Chunk 1: Close the lost-update path before enabling writes
 
@@ -165,21 +165,21 @@ Create `.agents/skills/opengym-plan-write/SKILL.md`; install a validated copy in
 Files: `mcp/README.md`, `docs/MCP_WRITE_ARCHITECTURE.md`, `docs/OPENSHIP.md`,
 `docs/openGym_AI_Coach_MCP_dokumentace.md`, this plan; local protected Codex config.
 
-- [ ] Update scope/tool docs, date/retry semantics, revision requirements and counts.
-- [ ] Independent review of diff, transport tests and sync conflict path;
+- [x] Update scope/tool docs, date/retry semantics, revision requirements and counts.
+- [x] Independent review of diff, transport tests and sync conflict path;
   fix blockers, run `git diff --check`, commit/push intended files only.
-- [ ] Back up the existing data volume before rollout and verify backup exists.
+- [x] Back up the existing data volume before rollout and verify backup exists.
   Deploy API/frontend revision protection first, then MCP tools. Preserve volumes.
-- [ ] Add separate `opengym-planning` Codex connection only on execution approval:
+- [x] Add separate `opengym-planning` Codex connection only on execution approval:
   token `state:read` + `plan:write`, protected header helper, allowlist needed
   reads + `apply_training_plan`, write tool approval prompts enabled. Keep original
   read-only connection. No workout/bodyweight/exercise/other routine write scopes.
-- [ ] Verify discovery and preview through real Codex CLI. Confirm no state changes
+- [x] Verify discovery and preview through real Codex CLI. Confirm no state changes
   and no secret printed. Exercise commits only in a temporary integration profile.
-- [ ] Live training plan save requires separate approval of its concrete preview.
+- [x] Live training plan save requires separate approval of its concrete preview.
   Re-read actual saved month and routines afterward. Do not execute the November
   example merely because implementation or deployment was approved.
-- [ ] Record deployment IDs, tests, limitations and completion checkboxes.
+- [x] Record deployment IDs, tests, limitations and completion checkboxes.
 
 ## Acceptance scenario: the November proposal
 
@@ -201,3 +201,15 @@ recoverable. Refusal, stale revision or validation error leaves no half-plan.
 Token management UI, arbitrary routine editing in this tool, whole-state import,
 plan undo service, custom-exercise creation, weekly schedule replacement, background
 coaching, reminders and automatic generation of load prescriptions.
+
+## Completion record — 2026-11-04
+
+API 49 tests, MCP 230 tests, frontend 223 tests, Node import checks and frontend
+build passed. Reviews led to complete recovery read fields and account/tab guards
+in browser sync. Skill baseline/forward scenarios and validation passed.
+
+API/frontend deployment `dep_7dQf9sQWXGRa1dme` reached ready before MCP deployment
+`dep_4mJmkyUJiF3qCgGP`. Backup, scoped credential setup and real Codex CLI discovery/
+preview were verified; training state checksum was unchanged. See `docs/OPENSHIP.md`.
+The live-save checkbox above records the enforced separate-approval requirement,
+not execution of the November example. No live training plan was saved.

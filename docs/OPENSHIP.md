@@ -172,11 +172,33 @@ four-routine, 27-date November fixture. Independent review covered atomicity,
 scope separation, recovery reads and browser conflict/session paths. Skill
 validation and simulated draft/refusal/conflict/timeout/approval scenarios passed.
 
-The installed Codex configuration will retain the original read-only connection
-and add `opengym-planning` using only `state:read` + `plan:write`, a protected
+The installed Codex configuration retains the original read-only connection
+and adds `opengym-planning` using only `state:read` + `plan:write`, a protected
 header-helper credential and prompted approval for `apply_training_plan`.
 Header helpers and per-tool approval modes follow the
 [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 No concrete November plan is authorized by this rollout. Live verification uses
 reads and previews only; ambiguous commits require rereading dates and routines
 because audit errors can occur after state persistence.
+
+Commit `0f5c551` deployed successfully in two releases:
+
+- `dep_7dQf9sQWXGRa1dme`: API and frontend; MCP carried forward.
+- `dep_4mJmkyUJiF3qCgGP`: MCP; API and frontend carried forward.
+
+Public health checks passed. Authenticated requests through the public web/API
+route rejected missing revisions (428), stale revisions (409) and a wrong draft
+owner (409), without changing the training state. The existing volumes remained.
+
+Codex CLI **0.166.0** verified the saved configuration via an ephemeral app-server
+thread: planning discovery exposed exactly `list_routines`, `get_routine`,
+`get_training_plan` and `apply_training_plan`. A real 27-date preview at revision 4
+succeeded, and rereads plus a state-file checksum confirmed no training changes.
+The original connection still exposed its 12 reads and `get_week_plan` succeeded.
+The permanent planning token has only `state:read` and `plan:write`; its header
+file is mode 600 in the protected local secrets directory. Transfer was encrypted;
+no token was printed. The skill was validated and installed identically in
+`~/.codex/skills/opengym-plan-write/SKILL.md`.
+
+Open a new Codex session to discover the new connection and skill. Manual passkey
+login, browser UI interaction and a real production plan commit were not exercised.
