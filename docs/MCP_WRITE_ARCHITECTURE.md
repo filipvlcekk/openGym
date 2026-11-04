@@ -8,6 +8,27 @@ The design goal is simple: every write must be authenticated, scoped, validated,
 
 ## Implementation Status
 
+Update 2026-11-04: confirmed monthly plan writes add `get_training_plan`
+(`state:read`) and `apply_training_plan` (`plan:write`). Preview is the default;
+commit requires the identical normalized proposal, user/token-bound SHA-256
+`preview_hash` and current `expected_revision`. New routines and all explicit
+dated assignments are validated and saved under one state lock. Existing routines,
+history and recurring week are preserved. No-op plan commits opt into
+`skipUnchanged:true` and do not increment revision or append audit events.
+
+The browser API now requires `expected_revision`: 428 when missing, 400 when
+invalid, 409 for conflicts, 423 for lock failure and 422 for invalid state.
+Successful writes acknowledge `revision`. Browser writes also include `expected_uid`;
+a session/profile mismatch is rejected with 409 `STATE_OWNER_MISMATCH`. Frontend sync serializes snapshots,
+marks drafts dirty immediately and retains them across failed/conflicting writes
+and reloads; Settings offers local export and confirmed server reload.
+
+State rename precedes audit append. An audit failure can therefore occur after
+data persisted; `PLAN_COMMIT_UNCERTAIN` requires reading dates and exact routine
+definitions before retrying. No state-plus-audit transaction or automatic undo
+is promised. See the [confirmed-plan design](superpowers/specs/2026-11-03-confirmed-training-plan-design.md)
+and `.agents/skills/opengym-plan-write/SKILL.md` for the approval workflow.
+
 As of 2026-09-06:
 
 - Done: `api/state-service.js` owns API state reads and full-state replacement.
@@ -161,6 +182,7 @@ routine:write    edit_routine
 workout:write    log_workout, log_freestyle_workout
 bodyweight:write add_bodyweight
 exercise:write   create_custom_exercise
+plan:write       apply_training_plan
 ```
 
 Read tools can stay filesystem-only initially, but once write auth exists it is cleaner to require token auth for write tools and leave read-only tools unchanged.
@@ -615,7 +637,7 @@ Regression test for the main failure mode:
 ## Open Decisions
 
 - Whether token creation is user-self-service or admin-only in the first version.
-- Whether `PUT /api/data` should require `expected_revision` immediately or accept it optionally during a compatibility window.
+- `PUT /api/data` requires `expected_revision` as of 2026-11-04; old clients must reload before saving.
 - Whether audit events should rotate by size or date.
 
 ## Recommendation

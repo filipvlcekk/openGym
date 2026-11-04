@@ -2,6 +2,7 @@ const READ_TOOLS = new Set([
   'list_routines',
   'get_routine',
   'get_week_plan',
+  'get_training_plan',
   'list_workouts',
   'get_workout',
   'get_bodyweight',
@@ -14,6 +15,7 @@ const READ_TOOLS = new Set([
 ])
 
 const WRITE_TOOL_SCOPES = new Map([
+  ['apply_training_plan', 'plan:write'],
   ['override_day', 'schedule:write'],
   ['assign_weekday', 'schedule:write'],
   ['edit_routine', 'routine:write'],

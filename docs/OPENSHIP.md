@@ -151,3 +151,32 @@ Deployment `dep_UBrf3g3uCsvIDYLB` reached `ready` from commit `1258233`.
 API and web containers were carried forward with existing data volumes. The
 deployed MCP image passed a synthetic, in-memory RPE-8 average check; authenticated
 production `training_summary` and public HTTPS `/healthz` passed afterward.
+
+## Confirmed monthly plans — 2026-11-04
+
+Implementation adds revision-safe browser sync, `get_training_plan` and atomic
+`apply_training_plan`, plus `.agents/skills/opengym-plan-write/SKILL.md`.
+API and frontend must deploy together before MCP writes are enabled. Stale clients
+receive 428/409; users can export retained drafts and confirm server reload in
+Settings. Browser requests bind their draft to the expected authenticated profile.
+
+Before rollout the shared data volume was backed up on the deployment host:
+`/var/backups/opengym/pre-confirmed-plan-20261104.tar.gz` (mode 600, archive listing
+verified, SHA-256 `2ed04a95254d018d1a8685b5e2bcb9c0f28c6a6837f24b5e92c6f33194df767a`).
+Existing data/media volumes are retained. Restore was not exercised.
+
+Local verification: API 49 tests, MCP 230 tests, frontend 223 tests and production
+build passed; the existing large-chunk build warning remains. MCP tests include
+real HTTP/stdio SDK preview/commit in temporary profiles and the complete
+four-routine, 27-date November fixture. Independent review covered atomicity,
+scope separation, recovery reads and browser conflict/session paths. Skill
+validation and simulated draft/refusal/conflict/timeout/approval scenarios passed.
+
+The installed Codex configuration will retain the original read-only connection
+and add `opengym-planning` using only `state:read` + `plan:write`, a protected
+header-helper credential and prompted approval for `apply_training_plan`.
+Header helpers and per-tool approval modes follow the
+[official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+No concrete November plan is authorized by this rollout. Live verification uses
+reads and previews only; ambiguous commits require rereading dates and routines
+because audit errors can occur after state persistence.

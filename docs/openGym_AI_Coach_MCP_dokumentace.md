@@ -2445,6 +2445,26 @@ Doporučený první cíl projektu:
 
 # 49. Poznámka k implementaci
 
+Aktualizace 4. 11. 2026: fork nyní nabízí 13 čtecích a 8 zapisovacích MCP
+nástrojů. `get_training_plan({from,to})` vrací revizi a každý den jednoho měsíce
+včetně zdroje přiřazení. `apply_training_plan` se scope `plan:write` nejprve
+vrací náhled; potvrzený zápis vyžaduje stejný návrh, `expected_revision`,
+`preview_hash` a `dry_run:false`. Najednou přidá nové rutiny a přiřadí všechny
+dny rozsahu, včetně explicitního `rest`. Stávající rutiny, historie a týdenní
+rozpis se nemění. Limity jsou 8 rutin, 20 cviků na rutinu a 31 dní v měsíci.
+
+Codex skill `.agents/skills/opengym-plan-write/SKILL.md` vyžaduje schválení
+konkrétního náhledu a následné ověření termínů i definic rutin. Nenastavené váhy
+se nevymýšlejí. Náhled uvádí také hodnoty, které může zahájení tréninku převzít
+z historie. Po konfliktu je potřeba nový náhled a souhlas; po timeoutu nejprve
+čtením ověřit výsledek, protože chyba auditu může nastat až po uložení stavu.
+
+Webový zápis vyžaduje revizi a zastaralé změny odmítá. Prohlížeč zachová místní
+koncept a v Nastavení nabídne export a potvrzené načtení serverových dat.
+Pro plánování se používá samostatné připojení `opengym-planning` se scope
+`state:read` + `plan:write`; původní čtecí připojení zůstává zachované.
+Nasazení funkce neznamená souhlas s uložením konkrétního listopadového plánu.
+
 Tento dokument kombinuje dvě kategorie informací:
 
 ### Aktuálně existující upstream funkce

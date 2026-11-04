@@ -152,3 +152,14 @@ test('revokeToken prevents later verification', () => {
     });
   });
 });
+
+
+test('plan scope permits only planning writes and rejects unsupported scopes', () => {
+  withTempTokenService(tokens => {
+    const created = tokens.createToken({ uid: 'u1', name: 'Planner', scopes: ['state:read', 'plan:write'] });
+    assert.equal(tokens.verifyToken(created.token, { requiredScope: 'plan:write' }).ok, true);
+    assert.equal(tokens.verifyToken(created.token, { requiredScope: 'routine:write' }).error.code, 'TOKEN_FORBIDDEN');
+    assert.equal(tokens.verifyToken(created.token, { requiredScope: 'workout:write' }).error.code, 'TOKEN_FORBIDDEN');
+    assert.throws(() => tokens.createToken({ uid: 'u1', scopes: ['plan:admin'] }), /invalid token scope/);
+  });
+});

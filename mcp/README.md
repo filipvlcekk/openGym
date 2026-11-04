@@ -14,9 +14,10 @@ The numbers it answers with are computed by the **same pure functions the React 
 (`frontend/src/lib/*.js`) — `estimate1RM`, `loadOfWorkouts`, `effectiveRoutine`, etc. — so a
 "what's my bench 1RM?" answer matches the Stats screen exactly.
 
-> The fork ships twelve read-only tools plus scoped write tools:
+> The fork ships thirteen read-only tools plus eight scoped write tools:
 > `override_day`, `assign_weekday`, structured `edit_routine` patch ops, `add_bodyweight`
-> structured `log_workout`, `log_freestyle_workout` and `create_custom_exercise`.
+> structured `log_workout`, `log_freestyle_workout`, `create_custom_exercise`
+> and confirmed atomic `apply_training_plan`.
 
 ## Quick start
 
@@ -112,6 +113,7 @@ Scopes:
 | Scope | Remote access |
 |---|---|
 | `state:read` | Required for all read tools |
+| `plan:write` | `apply_training_plan` only |
 | `schedule:write` | `override_day`, `assign_weekday` |
 | `routine:write` | `edit_routine` |
 | `exercise:write` | `create_custom_exercise` |
@@ -134,13 +136,15 @@ Remote MCP environment variables:
 
 ## Tools
 
-Twelve read-only tools and seven scoped write tools in this fork:
+Thirteen read-only tools and eight scoped write tools in this fork:
 
 | Tool | What it answers |
 |---|---|
 | `list_routines` | What routines are saved in my profile? (names + exercise counts) |
 | `get_routine` | What does the Push Day routine prescribe? (sets/reps/weight per exercise) |
 | `get_week_plan` | What's on my plan this week, including today with any date-specific override? |
+| `get_training_plan` | Inclusive dated assignments, rest/week/override source, current revision and unit within one calendar month. |
+| `apply_training_plan` | Preview or atomically append new routines and assign every date in one month. Requires `plan:write`, `expected_revision` and a matching `preview_hash` for commit. |
 | `list_workouts` | Recent sessions — newest first, with dates, sets done/planned, volume, duration, PRs. |
 | `get_workout` | Full set-by-set breakdown of one session, by `workout_id` or by date. On a day with two sessions the date alone returns both ids to pick from rather than guessing at one. |
 | `exercise_history` | Recent completed sessions for one exercise, newest first, with target, set labels and per-entry volume. |
@@ -190,7 +194,7 @@ dependencies landed in `frontend/`, no public exports changed.
 cd mcp && npm test
 ```
 
-182 MCP tests, including 112 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
+230 MCP tests, including 112 tool cases seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic fixture
 the public demo runs on). Pins JSON shape and the user-facing edge cases: rest-day override,
 missing routine, zero-workout history, no synced state, superset links, per-exercise history,
 period training summaries, conservative stall detection, three 1RM formulas, deterministic
@@ -204,6 +208,28 @@ tools see consistent values regardless of when the suite runs. The pure lib func
 their own 92 tests in `frontend/src/lib/*.test.js`.
 
 ## Roadmap
+
+Confirmed monthly plans use the `opengym-plan-write` Codex skill in `.agents/skills/`.
+Read state, call `apply_training_plan` with `dry_run:true` (the default), show its
+normalized routines/dates and initialization disclosure, obtain approval, then send
+the identical proposal with `dry_run:false`, `expected_revision` and `preview_hash`.
+Every date requires a routine or explicit `rest`; 8 new routines / 20 exercises per
+routine / 31 dates are the limits. Existing routine IDs cannot be overwritten.
+Omitted weights remain unconfigured. Initial workout sets may inherit reps, loads
+or duration from history across routines; the preview discloses current first sets.
+
+Use a separate `opengym-planning` connection with `state:read` + `plan:write` and
+prompt approval for `apply_training_plan`. Keep the original read-only connection.
+On conflicts obtain approval of a fresh preview. After an ambiguous failure read
+the dates **and routine definitions** before retrying: state persistence precedes
+audit logging, so an error does not prove rollback. Verify saved data by reading it.
+
+Browser `PUT /api/data` requires `expected_revision`: missing/invalid revisions
+return 428/400, stale revisions 409, lock failures 423 and invalid state 422.
+The browser retains conflicting drafts for export and explicit reload in Settings.
+Deploy API/frontend revision protection together before enabling plan writes.
+See the [design](../docs/superpowers/specs/2026-11-03-confirmed-training-plan-design.md)
+and [implementation record](../docs/superpowers/plans/2026-11-03-confirmed-training-plan.md).
 
 - **Done (Phase 1):** read-only stdio, 8 base tools, direct `./data` access.
 - **Done (Phase 1.5):** `progression_next`, `exercise_history`, `training_summary`

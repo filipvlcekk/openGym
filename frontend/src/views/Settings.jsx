@@ -18,7 +18,7 @@ export default function Settings() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
-  const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo } = useStore()
+  const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo, syncStatus, syncError, reloadServerState } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
   const importRef = useRef(null)
@@ -62,7 +62,7 @@ export default function Settings() {
     confirmText: t('Sign out everywhere'), danger: true,
     onConfirm: async () => {
       try { await signOutAll(); nav('/home'); toast(t('Signed out on all devices')) }
-      catch (e) { toast(t('Could not sign out everywhere — you are still signed in.')) }
+      catch (e) { toast(e.message || t('Could not sign out everywhere — your local data is still on this device.')) }
     },
   })
 
@@ -87,7 +87,7 @@ export default function Settings() {
       </> : user ? <>
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={t('Signed in with passkey — data syncs to this profile.')} />
         {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
-        <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: () => { signOut(); nav('/home') } })} />
+        <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: async () => { try { await signOut(); nav('/home') } catch (e) { toast(e.message || t('Could not sign out — your local data is still on this device.')) } } })} />
         <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
       </> : webauthnOK() ? <>
         <Row icon="sparkles" iconTint="var(--acc)" title={t('Create passkey profile')} subtitle={t('Keeps your data safe and separate per person.')} accessory="chevron" onClick={registerHere} />
@@ -97,6 +97,20 @@ export default function Settings() {
       )}
     </Section>
     {!user && !DEMO && !MOBILE && <p className="sect-f" style={{ marginTop: -18, marginBottom: 22 }}>{t('Guest mode — data lives only in this browser.')}</p>}
+
+    {user && !DEMO && !MOBILE && <Section title={t('Sync')}>
+      <Row icon="shield" iconTint={syncStatus === 'conflict' || syncStatus === 'error' ? 'var(--red)' : 'var(--acc)'}
+        title={t(syncStatus === 'saved' ? 'All changes synced' : syncStatus === 'syncing' ? 'Syncing…' : syncStatus === 'conflict' ? 'Sync needs attention' : syncStatus === 'error' ? 'Changes saved on this device' : 'Changes waiting to sync')}
+        subtitle={syncStatus === 'conflict' ? t('Your local draft has been kept. Export a backup before replacing it with server data.') : syncError?.message}
+      />
+      {syncStatus !== 'saved' && <Row icon="download" iconTint="var(--blue)" title={t('Export local backup (JSON)')} accessory="chevron" onClick={doExport} />}
+      {syncStatus === 'error' && <Row icon="reset" iconTint="var(--blue)" title={t('Retry sync')} accessory="chevron"
+        onClick={async () => { try { await pushState() } catch (e) { toast(e.message) } }} />}
+      {(syncStatus === 'conflict' || syncStatus === 'error') && <Row icon="reset" iconTint="var(--red)" title={t('Reload server data')} danger accessory="chevron"
+        onClick={() => confirmSheet({ title: t('Replace local draft?'), message: t('This discards unsynced changes on this device and loads the server data. Export a backup first. Your active workout stays on this device.'), confirmText: t('Reload server data'), danger: true,
+          onConfirm: async () => { try { await reloadServerState(); toast(t('Server data loaded')) } catch (e) { toast(e.message || t('Could not load server data. Your draft is still on this device.')) } },
+        })} />}
+    </Section>}
 
     {/* ---------- general ---------- */}
     <Section title={t('General')} footer={t('Note: switching units only changes the label — logged numbers are not converted.')}>

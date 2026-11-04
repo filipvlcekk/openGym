@@ -180,6 +180,52 @@ describe('standard Streamable HTTP MCP', () => {
     expect(fs.existsSync(path.join(dataDir, 'audit.log'))).toBe(false)
   })
 
+  test('SDK discovers typed monthly tools, previews without writes and commits an isolated plan', async () => {
+    const created = token('user-a', ['state:read', 'plan:write']), client = await connect(created.token)
+    const listed = await client.listTools()
+    expect(listed.tools).toHaveLength(21)
+    expect(listed.tools.find(t => t.name === 'get_training_plan').inputSchema).toMatchObject({ required: ['from', 'to'], additionalProperties: false })
+    expect(listed.tools.find(t => t.name === 'apply_training_plan').inputSchema).toMatchObject({ required: ['from', 'to', 'new_routines', 'days', 'expected_revision'], additionalProperties: false })
+    const args = { from: '2026-11-04', to: '2026-11-05', expected_revision: 7,
+      new_routines: [{ id: 'nov-a', name: 'A', exercises: [{ exercise_id: '0043', target: { sets: 2, repsMin: 6, repsMax: 8 } }] }],
+      days: [{ date: '2026-11-04', routine_id: 'nov-a' }, { date: '2026-11-05', routine_id: 'rest' }] }
+    const preview = JSON.parse((await client.callTool({ name: 'apply_training_plan', arguments: args })).content[0].text)
+    expect(preview).toMatchObject({ ok: true, dry_run: true, revision: 7 })
+    expect(state('user-a').routines).toHaveLength(1)
+    expect(fs.existsSync(path.join(dataDir, 'audit.log'))).toBe(false)
+    const rejected = await client.callTool({ name: 'apply_training_plan', arguments: { ...args, extra: true } })
+    expect(rejected.isError).toBe(true)
+    const committed = JSON.parse((await client.callTool({ name: 'apply_training_plan', arguments: { ...args, dry_run: false, preview_hash: preview.preview_hash } })).content[0].text)
+    expect(committed).toMatchObject({ ok: true, revision_after: 8 })
+    const read = JSON.parse((await client.callTool({ name: 'get_training_plan', arguments: { from: args.from, to: args.to } })).content[0].text)
+    expect(read).toMatchObject({ revision: 8, days: [{ routine_id: 'nov-a', source: 'override' }, { routine_id: 'rest', rest: true }] })
+    expect(state('user-b').routines).toHaveLength(1)
+    expect(state('user-b')._revision).toBe(7)
+    expect(fs.readFileSync(path.join(dataDir, 'audit.log'), 'utf8')).not.toContain(created.token)
+    createTokenService({ dataDir }).revokeToken(created.record.id, 'user-a')
+    await expect(client.callTool({ name: 'apply_training_plan', arguments: args })).rejects.toMatchObject({ code: 401 })
+  })
+
+  test.each([
+    [['state:read'], 'apply_training_plan', { from: '2026-11-04', to: '2026-11-04', expected_revision: 7, new_routines: [], days: [{ date: '2026-11-04', routine_id: 'rest' }] }],
+    [['plan:write'], 'get_training_plan', { from: '2026-11-04', to: '2026-11-04' }]
+  ])('new planning tools enforce scope separation %s', async (scopes, name, args) => {
+    const client = await connect(token('user-a', scopes).token)
+    await expect(client.callTool({ name, arguments: args })).rejects.toMatchObject({ code: 403 })
+    expect(state('user-a')._revision).toBe(7)
+    expect(fs.existsSync(path.join(dataDir, 'audit.log'))).toBe(false)
+  })
+
+  test('planning previews share the write rate limit', async () => {
+    await start({ rateLimits: { write: { limit: 1 } } })
+    const bearer = token('user-a', ['plan:write']).token
+    const call = request('tools/call', { name: 'apply_training_plan', arguments: { from: '2026-11-04', to: '2026-11-04', expected_revision: 7, new_routines: [], days: [{ date: '2026-11-04', routine_id: 'rest' }] } })
+    expect((await post(call, bearer)).res.status).toBe(200)
+    expect((await post(call, bearer)).res.status).toBe(429)
+    expect(state('user-a')._revision).toBe(7)
+    expect(fs.existsSync(path.join(dataDir, 'audit.log'))).toBe(false)
+  })
+
   test('standard requests require auth and rate limit failed authentication', async () => {
     await start({ rateLimits: { authFail: { limit: 1 } } })
     const missing = await post(request('tools/list'))

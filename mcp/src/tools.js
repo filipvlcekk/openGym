@@ -2,6 +2,8 @@
    {0}/{1} template the lib returns so the LLM gets final text, not template strings.
    ISO dates are validated on the way in; the handlers never see 'yesterday'. */
 import { z } from 'zod'
+import { createHash } from 'node:crypto'
+import { validateState } from '../../api/state-validation.js'
 import { createAuditService } from '../../api/audit-service.js'
 import { createStateService } from '../../api/state-service.js'
 import { getState, getStateForUid } from './state.js'
@@ -10,7 +12,7 @@ import {
   setLabel, exLine, muscleName, policyName, friendlyDuration, ratio, muscleOrder, fmt
 } from './labels.js'
 import {
-  modeOf, workoutVolume, setsDone, effectiveRoutine, effectiveRoutineId, bestWeightFor, defaultConfig, cleanupSg
+  modeOf, workoutVolume, setsDone, effectiveRoutine, effectiveRoutineId, bestWeightFor, defaultConfig, cleanupSg, buildSets
 } from '../../frontend/src/lib/history.js'
 import { BODYPARTS, EXDB, EXIDX, exOr } from '../../frontend/src/lib/exercises.js'
 import {
@@ -758,7 +760,7 @@ function validateTargetField(field, value) {
 }
 
 function exerciseFromLibrary(S, exerciseId) {
-  return EXIDX[exerciseId] || (S.customEx || []).find(ex => ex.id === exerciseId) || null
+  return (Object.hasOwn(EXIDX, exerciseId) ? EXIDX[exerciseId] : null) || (S.customEx || []).find(ex => ex.id === exerciseId) || null
 }
 
 function requireLibraryExercise(S, exerciseId) {
@@ -1278,10 +1280,13 @@ export const getRoutine = {
           sets: cfg.sets || 1,
           reps: mode === 'reps' ? (cfg.reps || 0) : undefined,
           reps_min: mode === 'reps' && cfg.repsMin != null ? cfg.repsMin : undefined,
+          reps_max: mode === 'reps' && cfg.repsMax != null ? cfg.repsMax : undefined,
           sec: mode === 'time' ? (cfg.sec || 0) : undefined,
           min: mode === 'cardio' ? (cfg.min || 0) : undefined,
           speed: mode === 'cardio' ? (cfg.speed || 0) : undefined,
           weight: cfg.weight != null ? cfg.weight : undefined,
+          bodyweight: cfg.bodyweight,
+          side: cfg.side,
           increment: cfg.inc != null ? cfg.inc : undefined,
           policy_override: cfg.prog || cfg.policy || null,
           superset_group: cfg.sg || null,
@@ -2228,10 +2233,165 @@ export const logFreestyleWorkout = {
   }
 }
 
+
+const trainingPlanReadSchema = { from: ISO_DATE_SCHEMA, to: ISO_DATE_SCHEMA }
+const trainingPlanSchema = {
+  ...trainingPlanReadSchema,
+  new_routines: z.array(z.object({
+    id: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/).refine(id => id !== 'rest', 'rest is reserved'),
+    name: z.string().trim().min(1).max(120),
+    policy: z.enum(['off', 'linear', 'greyskull', 'double', 'time']).optional(),
+    exercises: z.array(z.object({ exercise_id: z.string().min(1), target: addExerciseTargetSchema.optional() }).strict()).min(1).max(20)
+  }).strict()).max(8),
+  days: z.array(z.object({ date: ISO_DATE_SCHEMA, routine_id: z.string().min(1) }).strict()).min(1).max(31),
+  expected_revision: z.number().int().min(0),
+  dry_run: z.boolean().optional(),
+  preview_hash: z.string().regex(/^[a-f0-9]{64}$/).optional()
+}
+
+function trainingDates(from, to) {
+  if (!isValidISODate(from) || !isValidISODate(to) || from > to || from.slice(0, 7) !== to.slice(0, 7)) {
+    fail('EINVAL', 'from and to must be ordered real ISO dates in one calendar month')
+  }
+  const dates = []
+  for (const date = new Date(from + 'T12:00:00Z'); date.toISOString().slice(0, 10) <= to; date.setUTCDate(date.getUTCDate() + 1)) {
+    dates.push(date.toISOString().slice(0, 10))
+  }
+  if (dates.length > 31) fail('EINVAL', 'range must contain at most 31 dates')
+  return dates
+}
+
+function trainingDay(S, date) {
+  const override = S.dayPlan?.[date]
+  const weekly = S.week?.[new Date(date + 'T12:00:00Z').getUTCDay()]
+  const routineId = override ?? weekly ?? null
+  return {
+    date,
+    routine_id: routineId,
+    routine_name: (S.routines || []).find(r => r.id === routineId)?.name || null,
+    rest: routineId === 'rest',
+    source: override != null ? 'override' : weekly != null ? 'week' : 'unassigned'
+  }
+}
+
+export const getTrainingPlan = {
+  name: 'get_training_plan',
+  description: 'Read every effective routine or explicit rest date within one calendar month, with override/week/unassigned source and current revision. Schedule assignments do not imply completed workouts.',
+  schema: trainingPlanReadSchema,
+  handler: (params, context) => {
+    const { from, to } = z.object(trainingPlanReadSchema).strict().parse(params)
+    const dates = trainingDates(from, to)
+    const S = stateForContext(context)
+    if (isToolError(S)) return S
+    if (!S) return noState()
+    return { revision: revisionOf(S), unit: S.unit || 'kg', date_range: { from, to }, days: dates.map(date => trainingDay(S, date)) }
+  }
+}
+
+function canonicalJSON(value) {
+  if (Array.isArray(value)) return '[' + value.map(canonicalJSON).join(',') + ']'
+  if (value && typeof value === 'object') return '{' + Object.keys(value).filter(key => value[key] !== undefined).sort().map(key => JSON.stringify(key) + ':' + canonicalJSON(value[key])).join(',') + '}'
+  return JSON.stringify(value)
+}
+
+function trainingPlanDraft(S, input, token) {
+  const dates = trainingDates(input.from, input.to)
+  const seen = new Set((S.routines || []).map(r => r.id))
+  const routines = input.new_routines.map(routine => {
+    if (seen.has(routine.id)) fail('EINVAL', `routine id ${JSON.stringify(routine.id)} already exists or is duplicated`)
+    seen.add(routine.id)
+    const exercises = new Set()
+    return { id: routine.id, name: routine.name, prog: routine.policy || 'off', ex: routine.exercises.map(({ exercise_id, target = {} }) => {
+      if (exercises.has(exercise_id)) fail('EINVAL', `duplicate exercise ${JSON.stringify(exercise_id)}`)
+      exercises.add(exercise_id)
+      const cfg = normalizeAddExerciseTarget(S, exercise_id, target)
+      if (requireLibraryExercise(S, exercise_id).bp === 'cardio') cfg.mode = 'cardio'
+      const mode = modeOf(cfg)
+      const { inc, prog, ...modeTarget } = target
+      validateFreestyleTargetForMode(mode, modeTarget)
+      if (target.reps == null && target.repsMin != null) cfg.reps = target.repsMin
+      if (mode === 'reps' && ((target.repsMin != null && cfg.reps < target.repsMin) || (target.repsMax != null && cfg.reps > target.repsMax))) {
+        fail('EINVAL', 'reps must be within the supplied repetition bounds')
+      }
+      if (target.weight == null) delete cfg.weight
+      return cfg
+    }) }
+  }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  const days = [...input.days].sort((a, b) => a.date.localeCompare(b.date))
+  if (days.length !== dates.length || days.some((day, i) => day.date !== dates[i])) fail('EINVAL', 'days must cover every date in the range exactly once')
+  for (const day of days) {
+    if (day.routine_id !== 'rest' && !seen.has(day.routine_id)) fail('EINVAL', `unknown routine ${JSON.stringify(day.routine_id)}`)
+  }
+  for (const routine of routines) {
+    if (!days.some(day => day.routine_id === routine.id)) fail('EINVAL', `new routine ${JSON.stringify(routine.id)} must be used by the plan`)
+  }
+  const next = { ...S, dayPlan: { ...(S.dayPlan || {}) } }
+  if (routines.length) next.routines = [...(S.routines || []), ...routines]
+  const changes = routines.map(r => ({ path: `routines.${r.id}`, before: null, after: r }))
+  for (const day of days) {
+    const before = S.dayPlan?.[day.date] ?? null
+    if (before !== day.routine_id) changes.push({ path: `dayPlan.${day.date}`, before, after: day.routine_id })
+    next.dayPlan[day.date] = day.routine_id
+  }
+  const validation = validateState(next)
+  if (!validation.ok) fail('STATE_VALIDATION_FAILED', 'State validation failed: ' + JSON.stringify(validation.issues))
+  const preview_hash = createHash('sha256').update(canonicalJSON({ uid: token.uid, token_id: token.id, revision: revisionOf(S), from: input.from, to: input.to, new_routines: routines, days })).digest('hex')
+  const initializationState = {
+    exWeights: S.exWeights || {},
+    workouts: (S.workouts || []).map(w => ({ ...w, entries: (w.entries || []).map(e => ({ ...e, sets: e.sets || [] })) }))
+  }
+  const workout_initialization = {
+    note: 'These first sets show current workout initialization, which may inherit reps, duration and loads from exercise history across routines or exWeights. Stored targets remain the prescription; history is unchanged.',
+    first_sets: routines.flatMap(routine => routine.ex.map(cfg => ({
+      routine_id: routine.id, exercise_id: cfg.id,
+      set: buildSets(initializationState, { ...cfg, sets: 1 })[0]
+    })))
+  }
+  return { next, changes, preview_hash, new_routines: routines, workout_initialization }
+}
+
+export const applyTrainingPlan = {
+  name: 'apply_training_plan',
+  description: 'Preview (default) or atomically save explicitly supplied new routines and complete dated assignments within one month. Requires plan:write, expected_revision and a matching preview_hash for commit. Never changes existing routines or the weekly plan. Unspecified loads stay unconfigured; existing workout initialization may inherit reps, duration and loads from exercise history across routines or exWeights. After an ambiguous error reread the dates and stable routine IDs before retrying.',
+  schema: trainingPlanSchema,
+  handler: (params, context) => {
+    const auth = writeAuthForContext('plan:write', context)
+    if (!auth.ok) return auth
+    const input = z.object(trainingPlanSchema).strict().parse(params)
+    const states = writeStateServices(dataDirForContext(context))
+    const S = states.readUserState(auth.token.uid)
+    if (isToolError(S)) return S
+    if (!S) return noState()
+    const revision = revisionOf(S)
+    if (input.expected_revision !== revision) return { ok: false, error: { code: 'STATE_CONFLICT', message: 'State changed since the tool read it.', current_revision: revision } }
+    const dry_run = input.dry_run !== false
+    let draft = trainingPlanDraft(S, input, auth.token)
+    if (dry_run) return { ok: true, dry_run: true, revision, unit: S.unit || 'kg', date_range: { from: input.from, to: input.to }, would_change: draft.changes.length > 0, changes: draft.changes, preview_hash: draft.preview_hash, new_routines: draft.new_routines, workout_initialization: draft.workout_initialization }
+    if (!input.preview_hash || input.preview_hash !== draft.preview_hash) fail('PREVIEW_MISMATCH', 'Commit requires the matching preview_hash from the identical proposal, revision, user and token')
+    let result
+    try {
+      result = states.updateUserState(auth.token.uid, current => {
+        draft = trainingPlanDraft(current, input, auth.token)
+        if (input.preview_hash !== draft.preview_hash) fail('PREVIEW_MISMATCH', 'Proposal changed; preview again before committing')
+        return draft.next
+      }, {
+        expectedRevision: input.expected_revision, skipUnchanged: true,
+        operation: 'apply_training_plan', actor: `mcp-token:${auth.token.id}`, tokenId: auth.token.id,
+        details: { from: input.from, to: input.to, routine_ids: draft.new_routines.map(r => r.id), date_count: input.days.length }
+      })
+    } catch (error) {
+      if (error.code === 'PREVIEW_MISMATCH' || error.code === 'EINVAL' || error.code === 'STATE_VALIDATION_FAILED') throw error
+      return { ok: false, error: { code: 'PLAN_COMMIT_UNCERTAIN', message: 'The write could have persisted before an error. Re-read the dated plan and routine definitions before retrying.', current_revision: revisionOf(states.readUserState(auth.token.uid)) } }
+    }
+    if (!result.ok) return result
+    return { ok: true, dry_run: false, changed: result.changed !== false, revision_before: revision, revision_after: result.revision, unit: S.unit || 'kg', changes: draft.changes, preview_hash: draft.preview_hash, new_routines: draft.new_routines, workout_initialization: draft.workout_initialization }
+  }
+}
+
 /* ---------- registration list ---------- */
 
 export const TOOLS = [
-  listRoutines, getRoutine, getWeekPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, createCustomExercise, addBodyweight, logWorkout, logFreestyleWorkout
+  listRoutines, getRoutine, getWeekPlan, getTrainingPlan, applyTrainingPlan, listWorkouts, getWorkout, exerciseHistory, trainingSummary, detectStalls, getBodyweight, estimate1rm, muscleBalance, progressionNext, overrideDay, assignWeekday, editRoutine, createCustomExercise, addBodyweight, logWorkout, logFreestyleWorkout
 ]
 
 function noState() {

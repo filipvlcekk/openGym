@@ -64,7 +64,7 @@ test('replaceUserState writes a sanitized full state and returns the sync timest
 
     const result = states.replaceUserState('user/../one', input);
 
-    assert.deepEqual(result, { ok: true, ts: 123456 });
+    assert.deepEqual(result, { ok: true, revision: 1, ts: 123456 });
     assert.equal(input.active.localOnly, true);
     assert.equal(path.basename(states.stateFile('user/../one')), 'state-userone.json');
     assert.deepEqual(readStored(states, 'user/../one'), {
@@ -80,7 +80,7 @@ test('replaceUserState accepts a valid minimal openGym state shape', () => {
   withTempStateService(states => {
     const result = states.replaceUserState('u1', validState());
 
-    assert.deepEqual(result, { ok: true, ts: null });
+    assert.deepEqual(result, { ok: true, revision: 1, ts: null });
     const stored = readStored(states, 'u1');
     assert.equal(stored._revision, 1);
     assert.equal(stored.routines.length, 2);
@@ -522,4 +522,130 @@ test('updateUserState does not append a commit audit event for stale revision co
     assert.equal(result.ok, false);
     assert.deepEqual(audit.readAuditEvents(), []);
   }, { audit: true });
+});
+
+
+test('updateUserState can skip an unchanged validated draft without writing or auditing', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    const original = { ...validState(), _revision: 12, _ts: 123456 };
+    const file = states.stateFile(uid);
+    const bytes = JSON.stringify(original, null, 2);
+    fs.writeFileSync(file, bytes);
+    fs.utimesSync(file, 1000, 1000);
+    const mtime = fs.statSync(file).mtimeMs;
+
+    const result = states.updateUserState(uid, current => ({
+      _ts: current._ts,
+      ...current,
+      active: { localOnly: true }
+    }), { expectedRevision: 12, skipUnchanged: true });
+
+    assert.deepEqual(result, { ok: true, changed: false, revision: 12, ts: 123456 });
+    assert.equal(fs.readFileSync(file, 'utf8'), bytes);
+    assert.equal(fs.statSync(file).mtimeMs, mtime);
+    assert.equal(fs.existsSync(file + '.tmp'), false);
+    assert.equal(fs.existsSync(states.lockFile(uid)), false);
+    assert.deepEqual(audit.readAuditEvents(), []);
+  }, { audit: true });
+});
+
+test('updateUserState rejects stale no-op revisions before calling the mutation', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    const original = { ...validState(), _revision: 12 };
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify(original));
+    let called = false;
+
+    const result = states.updateUserState(uid, () => { called = true; }, {
+      expectedRevision: 11, skipUnchanged: true
+    });
+
+    assert.equal(result.error.code, 'STATE_CONFLICT');
+    assert.equal(result.error.current_revision, 12);
+    assert.equal(called, false);
+    assert.deepEqual(readStored(states, uid), original);
+    assert.deepEqual(audit.readAuditEvents(), []);
+    assert.equal(fs.existsSync(states.lockFile(uid)), false);
+  }, { audit: true });
+});
+
+test('updateUserState validates even an unchanged draft before skipping writes', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    const original = { _revision: 12, routines: 'invalid legacy state' };
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify(original));
+
+    const result = states.updateUserState(uid, current => current, {
+      expectedRevision: 12, skipUnchanged: true
+    });
+
+    assert.equal(result.error.code, 'STATE_VALIDATION_FAILED');
+    assert.deepEqual(readStored(states, uid), original);
+    assert.deepEqual(audit.readAuditEvents(), []);
+    assert.equal(fs.existsSync(states.lockFile(uid)), false);
+  }, { audit: true });
+});
+
+test('updateUserState keeps default unchanged-write revision and audit behavior', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify({ _revision: 12, unit: 'kg' }));
+
+    const result = states.updateUserState(uid, current => current, { expectedRevision: 12 });
+
+    assert.deepEqual(result, { ok: true, revision: 13, ts: null });
+    assert.equal(readStored(states, uid)._revision, 13);
+    assert.equal(audit.readAuditEvents().length, 1);
+  }, { audit: true });
+});
+
+test('updateUserState writes changed drafts with skipUnchanged and strips legacy active state', () => {
+  withTempStateService((states, audit) => {
+    const uid = 'u1';
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify({
+      _revision: 12, unit: 'kg', active: { localOnly: true }
+    }));
+
+    const result = states.updateUserState(uid, current => current, {
+      expectedRevision: 12, skipUnchanged: true
+    });
+
+    assert.deepEqual(result, { ok: true, revision: 13, ts: null });
+    assert.deepEqual(readStored(states, uid), { _revision: 13, unit: 'kg' });
+    assert.equal(audit.readAuditEvents().length, 1);
+  }, { audit: true });
+});
+
+test('audit failure after persistence leaves committed state readable and releases the lock', () => {
+  withTempStateService(states => {
+    const uid = 'u1';
+    const dataDir = path.dirname(states.stateFile(uid));
+    fs.writeFileSync(states.stateFile(uid), JSON.stringify({ _revision: 12, unit: 'kg' }));
+    const failingAudit = createStateService({
+      dataDir,
+      audit: { appendAuditEvent() { throw new Error('audit unavailable'); } }
+    });
+
+    assert.throws(() => failingAudit.updateUserState(uid, current => ({ ...current, unit: 'lb' }), {
+      expectedRevision: 12, skipUnchanged: true
+    }), /audit unavailable/);
+
+    assert.deepEqual(readStored(states, uid), { _revision: 13, unit: 'lb' });
+    assert.equal(fs.existsSync(states.lockFile(uid)), false);
+    const retry = states.updateUserState(uid, current => current, {
+      expectedRevision: 12, skipUnchanged: true
+    });
+    assert.equal(retry.error.code, 'STATE_CONFLICT');
+    assert.equal(retry.error.current_revision, 13);
+  });
+});
+
+test('replaceUserState keeps server-owned revision handling for existing callers', () => {
+  withTempStateService(states => {
+    const result = states.replaceUserState('u1', { unit: 'kg', _revision: 'untrusted' });
+
+    assert.deepEqual(result, { ok: true, revision: 1, ts: null });
+    assert.deepEqual(readStored(states, 'u1'), { unit: 'kg', _revision: 1 });
+  });
 });

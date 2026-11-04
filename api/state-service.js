@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { validateState } from './state-validation.js';
 
 function safeUid(uid) {
@@ -102,8 +103,7 @@ export function createStateService({ dataDir, audit = null }) {
       const base = mutated && typeof mutated === 'object' ? mutated : draft;
       const next = Array.isArray(base) ? base : { ...base };
       delete next.active;
-      next._revision = currentRevision + 1;
-      const validation = validateState(next);
+      const validation = validateState(Array.isArray(next) ? next : { ...next, _revision: currentRevision + 1 });
       if (!validation.ok) {
         return {
           ok: false,
@@ -114,6 +114,10 @@ export function createStateService({ dataDir, audit = null }) {
           }
         };
       }
+      if (options.skipUnchanged && isDeepStrictEqual(next, current)) {
+        return { ok: true, changed: false, revision: currentRevision, ts: current._ts || null };
+      }
+      next._revision = currentRevision + 1;
       atomicWrite(stateFile(uid), JSON.stringify(next));
       audit?.appendAuditEvent({
         uid: safeUid(uid),
@@ -129,9 +133,7 @@ export function createStateService({ dataDir, audit = null }) {
   }
 
   function replaceUserState(uid, state, options = {}) {
-    const result = updateUserState(uid, () => state, { ...options, operation: options.operation || 'replace-state' });
-    if (!result.ok) return result;
-    return { ok: true, ts: result.ts };
+    return updateUserState(uid, () => state, { ...options, operation: options.operation || 'replace-state' });
   }
 
   return { stateFile, lockFile, readUserState, updateUserState, replaceUserState, atomicWrite };

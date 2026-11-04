@@ -587,4 +587,20 @@ describe('remote MCP HTTP server', () => {
     expect(json.error.message).toBe('Invalid JSON.')
     expect(JSON.stringify(json)).not.toContain('SECRETFRAGMENT')
   })
+  test('legacy HTTP recognizes monthly planning scopes and validates before writing', async () => {
+    writeState(dataDir, 'user-a')
+    const created = createToken(dataDir, { scopes: ['state:read', 'plan:write'] })
+    const args = { from: '2026-11-04', to: '2026-11-04', expected_revision: 7, new_routines: [], days: [{ date: '2026-11-04', routine_id: 'rest' }] }
+    const preview = await postRpc(baseUrl, rpcBody('tools/call', { name: 'apply_training_plan', arguments: args }), { token: created.token })
+    expect(preview.res.status).toBe(200)
+    const p = JSON.parse(preview.json.result.content[0].text)
+    expect(p).toMatchObject({ ok: true, dry_run: true, revision: 7 })
+    const denied = await postRpc(baseUrl, rpcBody('tools/call', { name: 'apply_training_plan', arguments: args }), { token: createToken(dataDir).token })
+    expect(denied.res.status).toBe(403)
+    const read = await postRpc(baseUrl, rpcBody('tools/call', { name: 'get_training_plan', arguments: { from: args.from, to: args.to } }), { token: created.token })
+    expect(read.res.status).toBe(200)
+    expect(readState(dataDir, 'user-a')._revision).toBe(7)
+    expect(readAuditEvents(dataDir)).toEqual([])
+  })
+
 })

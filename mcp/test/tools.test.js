@@ -2830,6 +2830,8 @@ describe('shared: no-state fallback', () => {
       list_routines: {},
       get_routine: { routine_id: '0031' },
       get_week_plan: {},
+      get_training_plan: { from: '2026-11-04', to: '2026-11-06' },
+      apply_training_plan: { from: '2026-11-04', to: '2026-11-04', new_routines: [], days: [{ date: '2026-11-04', routine_id: 'rest' }], expected_revision: 0 },
       list_workouts: {},
       get_workout: { date: '2026-07-26' },
       get_bodyweight: {},

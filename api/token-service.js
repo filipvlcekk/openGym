@@ -6,6 +6,7 @@ import { atomicWrite } from './state-service.js';
 
 export const TOKEN_SCOPES = new Set([
   'state:read',
+  'plan:write',
   'schedule:write',
   'routine:write',
   'workout:write',

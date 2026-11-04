@@ -6,6 +6,14 @@ import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
 
 const KEY = 'gym_state_v1'
+const dirty = () => localStorage.getItem('gym_dirty') === '1'
+const revision = state => state?._revision || 0
+const conflictError = () => Object.assign(new Error('Server data changed. Export your local backup, then reload server data in Settings.'), { code: 'STATE_CONFLICT', status: 409 })
+const ownerError = () => Object.assign(new Error('Local data belongs to another profile. Export your backup, then reload server data in Settings.'), { code: 'STATE_OWNER_MISMATCH', status: 409 })
+const blocked = e => ['STATE_CONFLICT', 'STATE_REVISION_REQUIRED', 'STATE_REVISION_INVALID', 'STATE_VALIDATION_FAILED'].includes(e.code) || [400, 409, 422, 428].includes(e.status)
+function savedSyncError() {
+  try { return JSON.parse(localStorage.getItem('gym_sync_error')) } catch { return null }
+}
 export const DEF = {
   unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
@@ -32,6 +40,26 @@ const hasData = st => !!((st.workouts || []).length || (st.routines || []).lengt
 export const useStore = create((set, get) => {
   let pushTm = null
   let saveTm = null
+  let inFlight = null
+  let edits = 0
+  let recovering = false
+  let persisted = localStorage.getItem(KEY)
+
+  const syncError = error => {
+    const info = { message: error.message, code: error.code, status: error.status, details: error.details }
+    if (blocked(error)) localStorage.setItem('gym_sync_error', JSON.stringify(info))
+    set({ syncStatus: blocked(error) ? 'conflict' : 'error', syncError: info })
+  }
+  const clearSyncError = () => {
+    localStorage.removeItem('gym_sync_error')
+    set({ syncError: null })
+  }
+  const pushQuietly = () => get().pushState().catch(() => {})
+  const schedulePush = (delay = 1500) => {
+    clearTimeout(pushTm)
+    pushTm = null
+    if (get().syncStatus !== 'conflict') pushTm = setTimeout(pushQuietly, delay)
+  }
 
   // Mobile build: mirror the state into a file in the app's data directory (survives WebView
   // storage eviction) and keep the native reminder schedule in step with the weekly plan.
@@ -41,14 +69,21 @@ export const useStore = create((set, get) => {
   }
 
   const persist = (S, push = true) => {
-    S._ts = Date.now()
+    if (push) S._ts = Date.now()
+    if (push && get().user) {
+      // Imported backups cannot change the revision this device has acknowledged.
+      S._revision = revision(get().S)
+      localStorage.setItem('gym_dirty', '1')
+      edits++
+      if (get().syncStatus !== 'conflict') set({ syncStatus: 'pending' })
+    }
     registerCustom(S.customEx)
-    localStorage.setItem(KEY, JSON.stringify(S))
+    persisted = JSON.stringify(S)
+    localStorage.setItem(KEY, persisted)
     set({ S })
     if (MOBILE) nativePersist()
     if (push && get().user) {
-      clearTimeout(pushTm)
-      pushTm = setTimeout(() => get().pushState(), 1500)
+      schedulePush()
     }
   }
 
@@ -66,16 +101,21 @@ export const useStore = create((set, get) => {
     if (pushTm) {
       clearTimeout(pushTm)
       pushTm = null
-      get().pushState()
+      pushQuietly()
     }
   })
+  window.addEventListener('online', () => { if (get().user && dirty()) pushQuietly() })
 
   // Everything a sign-out leaves behind on this device, whichever way it was triggered.
   const clearLocalSession = () => {
+    clearTimeout(pushTm)
+    clearSyncError()
     get().setUser(null)
     localStorage.removeItem('gym_guest')
     localStorage.removeItem('gym_dirty')
+    localStorage.removeItem('gym_state_user')
     localStorage.removeItem(KEY)
+    set({ syncStatus: 'saved' })
     persist(clone(DEF), false)
   }
 
@@ -83,6 +123,8 @@ export const useStore = create((set, get) => {
     S: (() => { const s = loadState(); registerCustom(s.customEx); return s })(),
     user: (() => { try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null } })(),
     ready: false,
+    syncStatus: savedSyncError() ? 'conflict' : dirty() ? 'pending' : 'saved',
+    syncError: savedSyncError(),
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
@@ -96,44 +138,120 @@ export const useStore = create((set, get) => {
     setGuest(v) { if (v) localStorage.setItem('gym_guest', '1'); else localStorage.removeItem('gym_guest'); set({}) },
 
     setUser(u) {
-      if (u) { localStorage.setItem('gym_user', JSON.stringify(u)); localStorage.removeItem('gym_guest') }
-      else localStorage.removeItem('gym_user')
-      set({ user: u })
+      if (u) {
+        const owner = localStorage.getItem('gym_state_user') || get().user?.id
+        if (owner && owner !== u.id) {
+          syncError(ownerError())
+        } else if (owner !== u.id) {
+          clearSyncError()
+          persist({ ...get().S, _revision: 0 }, false)
+          if (hasData(get().S) || get().S.active || dirty()) localStorage.setItem('gym_dirty', '1')
+        }
+        localStorage.setItem('gym_state_user', owner || u.id)
+        localStorage.setItem('gym_user', JSON.stringify(u))
+        localStorage.removeItem('gym_guest')
+      } else localStorage.removeItem('gym_user')
+      set({ user: u, syncStatus: savedSyncError() ? 'conflict' : dirty() ? 'pending' : 'saved' })
     },
 
     async pushState() {
       if (!get().user) return
+      const owner = localStorage.getItem('gym_state_user')
+      if (owner && owner !== get().user.id) { const error = ownerError(); syncError(error); throw error }
       clearTimeout(pushTm)
-      try { await api('/api/data', { method: 'PUT', body: JSON.stringify({ state: get().S }) }); localStorage.removeItem('gym_dirty') }
-      catch (e) { localStorage.setItem('gym_dirty', '1') }
+      pushTm = null
+      if (get().syncStatus === 'conflict') throw Object.assign(new Error(get().syncError.message), get().syncError)
+      if (recovering) throw new Error('Server reload is in progress.')
+      if (inFlight) return inFlight
+      if (!dirty()) return
+      inFlight = (async () => {
+        try {
+          while (dirty()) {
+            if (localStorage.getItem(KEY) !== persisted) throw conflictError()
+            const uid = get().user.id
+            const snapshot = clone(get().S)
+            const sentEdits = edits
+            set({ syncStatus: 'syncing' })
+            const ack = await api('/api/data', {
+              method: 'PUT', body: JSON.stringify({ state: snapshot, expected_revision: revision(snapshot), expected_uid: uid })
+            })
+            if (get().user?.id !== uid || get().syncError?.code === 'STATE_OWNER_MISMATCH') throw ownerError()
+            if (localStorage.getItem(KEY) !== persisted) throw conflictError()
+            if (!Number.isInteger(ack.revision) || ack.revision < 0) throw new Error('Server did not acknowledge a revision. Reload the app before saving.')
+            // Acknowledgement updates metadata only: edits made during the request stay local.
+            const latest = { ...get().S, _revision: ack.revision }
+            if (sentEdits === edits && ack.ts != null) latest._ts = ack.ts
+            persist(latest, false)
+            if (sentEdits === edits) localStorage.removeItem('gym_dirty')
+            clearSyncError()
+          }
+          set({ syncStatus: 'saved' })
+        } catch (e) {
+          syncError(e)
+          if (!blocked(e)) schedulePush(15000)
+          throw e
+        } finally { inFlight = null }
+      })()
+      return inFlight
     },
     async pullState() {
+      if (get().syncStatus === 'conflict') return
+      const uid = get().user?.id
       try {
+        if (inFlight) await inFlight
         const { state } = await api('/api/data')
+        if (get().user?.id !== uid || get().syncStatus === 'conflict') return
         const S = get().S
-        const dirty = localStorage.getItem('gym_dirty') === '1'
-        if (state && (!hasData(S) || ((state._ts || 0) >= (S._ts || 0) && !dirty))) {
-          const active = S.active
-          const next = Object.assign(clone(DEF), state)
-          if (active) next.active = active
-          persist(next, false)
-        } else if (hasData(S)) { await get().pushState() }
-      } catch (e) { /* offline — keep local */ }
+        if (dirty()) {
+          if (revision(state) > revision(S)) { syncError(conflictError()); return }
+          // A delayed read must not turn an acknowledged write into a conflict.
+          if (revision(state) === revision(S)) await get().pushState()
+          return
+        }
+        if (state && revision(state) >= revision(S)) {
+          persist(Object.assign(clone(DEF), state, { active: S.active }), false)
+          clearSyncError()
+          set({ syncStatus: 'saved' })
+        } else if (!state && hasData(S)) {
+          localStorage.setItem('gym_dirty', '1')
+          await get().pushState()
+        }
+      } catch (e) { syncError(e) }
+    },
+
+    // Only the confirmed Settings action may discard a retained local draft.
+    async reloadServerState() {
+      if (recovering) throw new Error('Server reload is already in progress.')
+      recovering = true
+      clearTimeout(pushTm)
+      try {
+        if (inFlight) await inFlight.catch(() => {})
+        const before = edits
+        const { state } = await api('/api/data')
+        if (before !== edits) throw new Error('Local data changed during reload. Export a backup and try again.')
+        persist(Object.assign(clone(DEF), state || {}, { active: get().S.active }), false)
+        localStorage.setItem('gym_state_user', get().user.id)
+        localStorage.removeItem('gym_dirty')
+        clearSyncError()
+        set({ syncStatus: 'saved' })
+      } finally { recovering = false }
     },
 
     async signOut() {
-      try { await get().pushState(); await api('/api/logout', { method: 'POST', body: '{}' }) } catch (e) { /* */ }
+      await get().pushState()
+      if (dirty()) throw new Error('Local data changed during sign-out. Your draft is still on this device.')
+      const savedEdits = edits
+      await api('/api/logout', { method: 'POST', body: '{}' })
+      if (dirty() || edits !== savedEdits) throw new Error('Local data changed during sign-out. Your draft is still on this device.')
       clearLocalSession()
     },
 
-    // "Sign out everywhere": the server bumps this profile's session version, which kills every
-    // session it has on any device — this browser included, so the app has to end up exactly
-    // where a normal signOut leaves it. Unlike signOut the request is NOT swallowed: if it fails
-    // the sessions elsewhere are all still valid, and wiping this device's copy of the data
-    // would sign the user out of the one place the bump didn't reach. Caller reports the error.
     async signOutAll() {
-      await get().pushState()   // never throws — stores gym_dirty and moves on when offline
+      await get().pushState()
+      if (dirty()) throw new Error('Local data changed during sign-out. Your draft is still on this device.')
+      const savedEdits = edits
       await api('/api/logout/all', { method: 'POST', body: '{}' })
+      if (dirty() || edits !== savedEdits) throw new Error('Local data changed during sign-out. Your draft is still on this device.')
       clearLocalSession()
     },
 

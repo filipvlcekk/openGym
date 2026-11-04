@@ -10,6 +10,7 @@ import {
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
 import { createAuditService } from './audit-service.js';
+import { createDataRoutes } from './data-routes.js';
 import { createMcpTokenRoutes } from './mcp-token-routes.js';
 import { atomicWrite, createStateService } from './state-service.js';
 import { createTokenService } from './token-service.js';
@@ -373,23 +374,7 @@ const routes = {
 
   ...createMcpTokenRoutes({ tokens, readSession, readBody, json }),
 
-  'GET /api/data': async (req, res) => {
-    const user = readSession(req);
-    if (!user) return json(res, 401, { error: 'not signed in' });
-    json(res, 200, { state: states.readUserState(user.id) });
-  },
-
-  'PUT /api/data': async (req, res) => {
-    const user = readSession(req);
-    if (!user) return json(res, 401, { error: 'not signed in' });
-    const body = await readBody(req);
-    if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
-    const result = states.replaceUserState(user.id, body.state, {
-      actor: `web-session:${user.id}`,
-      details: { source: 'PUT /api/data' }
-    }); // in-progress workouts stay device-local
-    json(res, 200, result);
-  },
+  ...createDataRoutes({ states, readSession, readBody, json }),
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
 
