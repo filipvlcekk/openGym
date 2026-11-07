@@ -202,3 +202,27 @@ no token was printed. The skill was validated and installed identically in
 
 Open a new Codex session to discover the new connection and skill. Manual passkey
 login, browser UI interaction and a real production plan commit were not exercised.
+
+## Automatic review pilot — 2026-11-07
+
+The user selected an automatic weekly report, then requested a single test on
+Saturday 7 November at 13:00 Europe/Prague. A project scheduled task is enabled
+and bound to the current discussion. The returned next run was verified as
+`2026-11-07T12:00:00.000Z`, which is 13:00 in Prague.
+
+This is a test attempt, not an approved recurring Monday report. The scheduler
+exposes recurring fixed-time triggers; the saved prompt instructs the task to
+pause itself **before** reading data, using its exact saved task ID. A run on a
+later local date must pause and report a missed test rather than produce another
+report. Self-pausing is an agent instruction, not a native one-shot guarantee.
+
+The report reuses `opengym-weekly-review`, existing read-only MCP scopes and the
+saved Codex connection. It must quote actual date ranges, separate week/6w
+context and report sparse data honestly. Delivery is only to this discussion;
+training data, deployment and credentials are outside the scheduled task scope.
+
+Preflight failed: both production hostnames resolved to `204.10.194.116`, but
+HTTPS returned `TLSV1_UNRECOGNIZED_NAME`. Codex MCP initialization also failed.
+The scheduled attempt must recheck connectivity and return a connection error
+if it is still unavailable. No report run or successful delivery is claimed.
+No server deployment or training-state change was made for this pilot.
